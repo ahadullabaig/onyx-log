@@ -1,0 +1,977 @@
+/* ============================================================================
+   ONYX LOG — "TRELLIS" DESIGN SYSTEM
+   Concept: the app is the bike's instrument cluster + ECU diagnostic terminal.
+   Fonts loaded via <link> in index.html (Chakra Petch, IBM Plex Sans/Mono).
+
+   COLOR ROLE DISCIPLINE — read before editing:
+     • KTM Orange  → identity + primary action + the trellis frame. Load-bearing.
+     • Coolant Ice → "optimal / cool / good" status and live data highlights.
+     • Amber / Red → caution / critical. The cyan→amber→red scale is a temp gauge.
+     • Raw Aluminum→ warm-neutral labels & secondary text (keeps it off "black+orange").
+   Orange is NEVER a status color; status never borrows the brand orange.
+   ============================================================================ */
+
+:root {
+  /* — Brand / frame — */
+  --ktm-orange: #ff5a0a;
+  --ktm-orange-bright: #ff6f28;
+  --ktm-orange-deep: #c7430a;
+  --ktm-orange-glow: rgba(255, 90, 10, 0.35);
+  --ktm-orange-soft: rgba(255, 90, 10, 0.10);
+  --ktm-orange-line: rgba(255, 90, 10, 0.055);
+
+  /* — Instrument status scale (cold → hot) — */
+  --coolant-ice-rgb: 79, 163, 209;              /* cool steel-blue — one source of truth */
+  --coolant-ice: rgb(var(--coolant-ice-rgb));
+  --coolant-ice-bg: rgba(var(--coolant-ice-rgb), 0.12);
+  --caution-amber: #ffb020;
+  --caution-amber-bg: rgba(255, 176, 32, 0.11);
+  --critical-red: #ff2e2e;
+  --critical-red-bg: rgba(255, 46, 46, 0.12);
+
+  /* — Anodized surfaces — */
+  --bg-obsidian: #0a0a0c;    /* base — warm graphite-black, not blue-black */
+  --bg-card: #131417;        /* anodized graphite panel */
+  --bg-card-2: #171920;      /* raised panel */
+  --bg-input: #0d0e11;
+  --bg-input-focus: #15171d;
+
+  /* — Ink — */
+  --text-primary: #f4f5f2;   /* signal white */
+  --text-secondary: #a7a093; /* raw aluminum, warm */
+  --text-muted: #6c675e;
+
+  /* — Machined edges — */
+  --border-metal: #24262d;
+  --border-metal-hover: #3a3d47;
+  --alum: #c9c3b4;           /* brushed aluminum */
+  --accent-silver: #c9c3b4;  /* legacy alias → aluminum */
+
+  /* — Legacy status aliases (kept so component classes resolve) — */
+  --color-success: var(--coolant-ice);
+  --color-success-bg: var(--coolant-ice-bg);
+  --color-warning: var(--caution-amber);
+  --color-warning-bg: var(--caution-amber-bg);
+  --color-danger: var(--critical-red);
+  --color-danger-bg: var(--critical-red-bg);
+
+  /* — Typography — */
+  --sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
+  --heading: 'Chakra Petch', var(--sans);   /* cockpit / gauge display */
+  --mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', monospace; /* telemetry */
+
+  /* — Depth & motion — */
+  --shadow-premium: 0 10px 34px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  --shadow-glow: 0 0 0 1px var(--ktm-orange-soft), 0 0 22px var(--ktm-orange-glow);
+  --transition-smooth: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  --radius-panel: 5px;       /* milled panel, not soft app */
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--sans);
+  background-color: var(--bg-obsidian);
+  color: var(--text-primary);
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* faint anodized field — barely-there vertical light */
+  background-image:
+    radial-gradient(120% 60% at 50% -10%, rgba(255, 90, 10, 0.05), transparent 60%),
+    linear-gradient(180deg, #0b0b0e, var(--bg-obsidian));
+  background-attachment: fixed;
+}
+
+/* Custom scrollbars — machined rails */
+::-webkit-scrollbar { width: 9px; height: 9px; }
+::-webkit-scrollbar-track { background: var(--bg-obsidian); }
+::-webkit-scrollbar-thumb {
+  background: var(--border-metal);
+  border-radius: 2px;
+  border: 2px solid var(--bg-obsidian);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--ktm-orange-deep); }
+
+::selection { background: var(--ktm-orange); color: #0a0a0c; }
+
+/* ============================================================================
+   LAYOUT
+   ============================================================================ */
+#root { display: flex; min-height: 100vh; }
+.app-container { display: flex; width: 100%; }
+
+/* — Sidebar: mounted on the trellis frame — */
+.sidebar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  width: 280px;
+  height: 100vh;
+  padding: 2rem 1.5rem;
+  display: flex;
+  flex-direction: column;
+  background-color: #101114;
+  border-right: 1px solid var(--border-metal);
+  overflow: hidden;
+}
+
+/* trellis mesh — triangulated tube pattern in faint orange */
+.sidebar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(62deg, transparent 0 25px, var(--ktm-orange-line) 25px 26px),
+    repeating-linear-gradient(-62deg, transparent 0 25px, var(--ktm-orange-line) 25px 26px);
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 18%, #000 78%, transparent);
+  mask-image: linear-gradient(180deg, transparent, #000 18%, #000 78%, transparent);
+}
+
+/* the glowing spar down the right edge */
+.sidebar::after {
+  content: '';
+  position: absolute;
+  top: 12%;
+  bottom: 12%;
+  right: -1px;
+  width: 2px;
+  background: linear-gradient(180deg, transparent, var(--ktm-orange), transparent);
+  box-shadow: 0 0 12px var(--ktm-orange-glow);
+}
+
+.sidebar > * { position: relative; z-index: 1; }
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-bottom: 2.5rem;
+  padding: 0 0.25rem 1.25rem;
+  border-bottom: 1px solid var(--border-metal);
+}
+
+.brand-title {
+  font-family: var(--heading);
+  font-size: 1.55rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.5px;
+  color: var(--text-primary);
+  text-transform: uppercase;
+}
+/* orange keyline under the wordmark — the frame's top spar */
+.brand-title::after {
+  content: '';
+  display: block;
+  width: 42px;
+  height: 3px;
+  margin-top: 0.6rem;
+  background: var(--ktm-orange);
+  box-shadow: 0 0 10px var(--ktm-orange-glow);
+}
+
+.brand-subtitle {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  margin-top: 0.3rem;
+}
+
+.nav-menu {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  flex-grow: 1;
+}
+
+.nav-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.8rem 1rem 0.8rem 1.15rem;
+  color: var(--text-secondary);
+  font-family: var(--heading);
+  font-weight: 500;
+  font-size: 0.9rem;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  text-decoration: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+/* left indicator rail */
+.nav-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  height: 0;
+  width: 3px;
+  background: var(--ktm-orange);
+  transform: translateY(-50%);
+  transition: height 0.2s ease;
+}
+.nav-item:hover {
+  color: var(--text-primary);
+  background-color: rgba(255, 255, 255, 0.025);
+}
+.nav-item:hover::before { height: 40%; }
+.nav-item.active {
+  color: var(--text-primary);
+  background: linear-gradient(90deg, var(--ktm-orange-soft), transparent 70%);
+  border-color: rgba(255, 90, 10, 0.22);
+}
+.nav-item.active::before { height: 62%; box-shadow: 0 0 10px var(--ktm-orange-glow); }
+.nav-item.active .nav-icon { color: var(--ktm-orange); }
+
+.nav-icon { width: 19px; height: 19px; flex-shrink: 0; }
+
+.sidebar-footer {
+  margin-top: auto;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border-metal);
+}
+
+/* bike status pod — like a gauge readout */
+.bike-card-mini {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 1rem 1rem 0.9rem;
+  background: linear-gradient(150deg, #16181e, #0f1013);
+  border: 1px solid var(--border-metal);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.bike-card-mini::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 2px;
+  background: linear-gradient(90deg, var(--ktm-orange), transparent);
+}
+.bike-name {
+  font-family: var(--heading);
+  font-weight: 600;
+  font-size: 0.85rem;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.bike-odo {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: var(--mono);
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.bike-odo-label {
+  font-family: var(--mono);
+  font-size: 0.6rem;
+  letter-spacing: 2px;
+  color: var(--ktm-orange);
+  text-transform: uppercase;
+}
+
+/* — Main content — */
+.main-content {
+  position: relative;
+  flex-grow: 1;
+  width: calc(100% - 280px);
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 2.5rem 2.75rem;
+}
+/* ignition sweep — a hairline of orange powers across on load */
+.main-content::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 2px;
+  transform-origin: left center;
+  background: linear-gradient(90deg, var(--ktm-orange), transparent 65%);
+  animation: ignitionSweep 0.7s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+/* ============================================================================
+   GRID + HEADERS
+   ============================================================================ */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 1.4rem;
+  margin-top: 2rem;
+}
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 1.75rem;
+}
+.page-title {
+  position: relative;
+  font-family: var(--heading);
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding-bottom: 0.65rem;
+}
+/* orange spar under every page title */
+.page-title::after {
+  content: '';
+  position: absolute;
+  left: 0; bottom: 0;
+  width: 56px; height: 3px;
+  background: var(--ktm-orange);
+  box-shadow: 0 0 10px var(--ktm-orange-glow);
+}
+/* breathing room between the spar and the page subtitle */
+.page-title + p { margin-top: 0.9rem; }
+
+.col-12 { grid-column: span 12; }
+.col-8 { grid-column: span 8; }
+.col-6 { grid-column: span 6; }
+.col-4 { grid-column: span 4; }
+.col-3 { grid-column: span 3; }
+
+/* ============================================================================
+   PANELS (cards) — milled components, keyed on at load
+   ============================================================================ */
+.card {
+  position: relative;
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-metal);
+  border-radius: var(--radius-panel);
+  padding: 1.5rem;
+  box-shadow: var(--shadow-premium);
+  transition: var(--transition-smooth);
+  animation: ecuBoot 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+.card:hover { border-color: var(--border-metal-hover); }
+/* staggered ECU boot */
+.card:nth-of-type(1) { animation-delay: 0.02s; }
+.card:nth-of-type(2) { animation-delay: 0.06s; }
+.card:nth-of-type(3) { animation-delay: 0.10s; }
+.card:nth-of-type(4) { animation-delay: 0.14s; }
+.card:nth-of-type(5) { animation-delay: 0.18s; }
+.card:nth-of-type(6) { animation-delay: 0.22s; }
+.card:nth-of-type(7) { animation-delay: 0.26s; }
+.card:nth-of-type(8) { animation-delay: 0.30s; }
+
+/* ============================================================================
+   STAT PODS — gauge readouts with HUD corner brackets
+   ============================================================================ */
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.9rem;
+  overflow: hidden;
+}
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 2px;
+  background: linear-gradient(90deg, var(--ktm-orange), transparent 70%);
+}
+/* HUD corner bracket, top-right */
+.stat-card::after {
+  content: '';
+  position: absolute;
+  top: 10px; right: 10px;
+  width: 12px; height: 12px;
+  border-top: 2px solid var(--border-metal-hover);
+  border-right: 2px solid var(--border-metal-hover);
+}
+.stat-label {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+}
+.stat-value {
+  font-family: var(--heading);
+  font-size: 2.35rem;
+  font-weight: 700;
+  line-height: 1;
+  letter-spacing: 0.5px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.stat-unit {
+  font-family: var(--mono);
+  font-size: 0.95rem;
+  color: var(--ktm-orange);
+  margin-left: 0.35rem;
+}
+
+/* ============================================================================
+   CIRCULAR STATUS RINGS — temperature-gauge metaphor
+   ============================================================================ */
+.status-ring-container { display: flex; align-items: center; gap: 1.5rem; }
+.circular-chart { display: block; max-width: 84px; max-height: 84px; }
+.circle-bg { fill: none; stroke: rgba(255, 255, 255, 0.05); stroke-width: 3.4; }
+.circle {
+  fill: none;
+  stroke-width: 3.4;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 0.6s ease, stroke-dasharray 0.6s ease;
+}
+/* cold/optimal → caution → critical */
+.circle.success { stroke: var(--coolant-ice); filter: drop-shadow(0 0 4px rgba(var(--coolant-ice-rgb),0.5)); }
+.circle.warning { stroke: var(--caution-amber); filter: drop-shadow(0 0 4px rgba(255, 176, 32, 0.5)); }
+.circle.danger {
+  stroke: var(--critical-red);
+  filter: drop-shadow(0 0 5px rgba(255, 46, 46, 0.6));
+  animation: critPulse 1.1s ease-in-out infinite;
+}
+.status-info { display: flex; flex-direction: column; gap: 0.3rem; }
+.status-title {
+  font-family: var(--heading);
+  font-weight: 600;
+  font-size: 1.1rem;
+  letter-spacing: 0.3px;
+  font-variant-numeric: tabular-nums;
+}
+.status-desc { font-size: 0.85rem; color: var(--text-secondary); }
+
+/* ============================================================================
+   FORMS
+   ============================================================================ */
+.form-group { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 1.25rem; }
+.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+label {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+input, select, textarea {
+  width: 100%;
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-metal);
+  color: var(--text-primary);
+  padding: 0.8rem 1rem;
+  border-radius: 4px;
+  font-family: var(--sans);
+  font-size: 0.95rem;
+  transition: var(--transition-smooth);
+}
+input::placeholder, textarea::placeholder { color: var(--text-muted); }
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--ktm-orange);
+  background-color: var(--bg-input-focus);
+  box-shadow: 0 0 0 3px var(--ktm-orange-soft);
+}
+/* number/date fields read like telemetry */
+input[type='number'], input[type='date'] { font-family: var(--mono); }
+
+/* ============================================================================
+   BUTTONS — primary IS the KTM orange (load-bearing)
+   ============================================================================ */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.78rem 1.4rem;
+  border-radius: 4px;
+  font-family: var(--heading);
+  font-weight: 600;
+  font-size: 0.85rem;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  cursor: pointer;
+  border: 1px solid transparent;
+  text-decoration: none;
+  transition: var(--transition-smooth);
+}
+.btn-primary {
+  background: linear-gradient(180deg, var(--ktm-orange-bright), var(--ktm-orange));
+  color: #0a0a0c;
+  box-shadow: 0 2px 0 var(--ktm-orange-deep), 0 6px 18px var(--ktm-orange-glow);
+}
+.btn-primary:hover {
+  background: linear-gradient(180deg, #ff7d3a, var(--ktm-orange-bright));
+  transform: translateY(-1px);
+  box-shadow: 0 3px 0 var(--ktm-orange-deep), 0 10px 26px var(--ktm-orange-glow);
+}
+.btn-primary:active { transform: translateY(1px); box-shadow: 0 1px 0 var(--ktm-orange-deep); }
+.btn-primary:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+
+.btn-secondary {
+  background-color: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-metal);
+}
+.btn-secondary:hover { border-color: var(--ktm-orange); color: var(--ktm-orange); }
+
+.btn-danger {
+  background-color: var(--critical-red-bg);
+  color: var(--critical-red);
+  border: 1px solid rgba(255, 46, 46, 0.28);
+}
+.btn-danger:hover { background-color: var(--critical-red); color: #fff; }
+
+.btn-icon { width: 17px; height: 17px; }
+
+/* Keyboard focus — visible everywhere */
+.btn:focus-visible,
+.nav-item:focus-visible,
+.checkbox-custom:focus-visible,
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 2px solid var(--ktm-orange);
+  outline-offset: 2px;
+}
+
+/* ============================================================================
+   MODALS / NATIVE DIALOG
+   ============================================================================ */
+dialog {
+  margin: auto;
+  border: 1px solid var(--border-metal);
+  border-top: 2px solid var(--ktm-orange);
+  border-radius: 6px;
+  background-color: var(--bg-card);
+  color: var(--text-primary);
+  padding: 2rem;
+  width: 90%;
+  max-width: 560px;
+  box-shadow: 0 30px 60px -12px rgba(0, 0, 0, 0.8), 0 0 40px var(--ktm-orange-soft);
+  outline: none;
+}
+dialog::backdrop { background-color: rgba(5, 5, 7, 0.8); backdrop-filter: blur(9px); }
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+}
+.modal-title {
+  font-family: var(--heading);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.modal-close { background: transparent; border: none; color: var(--text-secondary); cursor: pointer; transition: var(--transition-smooth); }
+.modal-close:hover { color: var(--ktm-orange); transform: rotate(90deg); }
+
+.receipt-dialog { max-width: 820px; width: 95%; height: 80vh; }
+/* flex layout only while open — otherwise this author rule would override the
+   UA `dialog:not([open]){display:none}` and render the closed dialog in-flow */
+.receipt-dialog[open] { display: flex; flex-direction: column; }
+.receipt-body {
+  flex-grow: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg-obsidian);
+  border: 1px solid var(--border-metal);
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+}
+.receipt-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.receipt-pdf { width: 100%; height: 100%; border: none; }
+
+/* ============================================================================
+   TABLES — telemetry logs
+   ============================================================================ */
+.table-container {
+  overflow-x: auto;
+  border: 1px solid var(--border-metal);
+  border-radius: var(--radius-panel);
+  background-color: var(--bg-card);
+}
+table { width: 100%; border-collapse: collapse; text-align: left; }
+th {
+  background-color: rgba(255, 255, 255, 0.015);
+  color: var(--text-secondary);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  padding: 0.9rem 1.25rem;
+  border-bottom: 1px solid var(--border-metal);
+  white-space: nowrap;
+}
+td {
+  padding: 0.95rem 1.25rem;
+  font-size: 0.92rem;
+  border-bottom: 1px solid var(--border-metal);
+  color: var(--text-primary);
+}
+tr:last-child td { border-bottom: none; }
+tr { transition: background-color 0.15s ease; }
+/* hover leaves an orange rail on the row */
+tr:hover td { background-color: rgba(255, 90, 10, 0.035); }
+tr:hover td:first-child { box-shadow: inset 3px 0 0 var(--ktm-orange); }
+
+/* ============================================================================
+   BADGES — status chips (never brand orange except DIY = "you")
+   ============================================================================ */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.28rem 0.65rem;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+}
+/* DIY = performed by the rider → brand orange */
+.badge-diy {
+  background-color: var(--ktm-orange-soft);
+  color: var(--ktm-orange-bright);
+  border: 1px solid rgba(255, 90, 10, 0.25);
+}
+/* Workshop = external → brushed steel */
+.badge-shop {
+  background-color: rgba(201, 195, 180, 0.08);
+  color: var(--alum);
+  border: 1px solid rgba(201, 195, 180, 0.2);
+}
+.badge-full { background-color: var(--coolant-ice-bg); color: var(--coolant-ice); border: 1px solid rgba(var(--coolant-ice-rgb),0.22); }
+.badge-partial { background-color: var(--caution-amber-bg); color: var(--caution-amber); border: 1px solid rgba(255, 176, 32, 0.22); }
+
+/* ============================================================================
+   CHECKLIST — pre-ride "systems check" warning lamps
+   ============================================================================ */
+.checklist { list-style: none; display: flex; flex-direction: column; gap: 0.4rem; }
+.checklist-item {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.65rem 0.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+}
+.checklist-item:last-child { border-bottom: none; }
+.checkbox-custom {
+  position: relative;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border: 2px solid var(--border-metal-hover);
+  border-radius: 3px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition-smooth);
+}
+.checkbox-custom:hover { border-color: var(--ktm-orange); }
+/* lamp lights ice-green when the system is cleared */
+.checkbox-custom.checked {
+  background-color: var(--coolant-ice-bg);
+  border-color: var(--coolant-ice);
+  box-shadow: 0 0 8px rgba(var(--coolant-ice-rgb),0.4);
+}
+.checkbox-custom.checked::after {
+  content: '✓';
+  color: var(--coolant-ice);
+  font-size: 12px;
+  font-weight: bold;
+}
+.checklist-text { font-size: 0.92rem; color: var(--text-primary); }
+.checklist-text.checked { color: var(--text-muted); }
+.checklist-val {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* ============================================================================
+   FILE UPLOAD
+   ============================================================================ */
+.drag-drop-zone {
+  border: 1.5px dashed var(--border-metal-hover);
+  border-radius: 5px;
+  padding: 2rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+  text-align: center;
+  transition: var(--transition-smooth);
+  background-color: rgba(255, 255, 255, 0.012);
+}
+.drag-drop-zone:hover, .drag-drop-zone.active {
+  border-color: var(--ktm-orange);
+  background-color: var(--ktm-orange-soft);
+}
+.drag-drop-icon { width: 30px; height: 30px; color: var(--text-secondary); }
+.drag-drop-zone:hover .drag-drop-icon, .drag-drop-zone.active .drag-drop-icon { color: var(--ktm-orange); }
+.upload-success { display: flex; align-items: center; gap: 0.5rem; color: var(--coolant-ice); font-size: 0.85rem; }
+
+/* ============================================================================
+   SVG MILEAGE CHART — the fuel map / dyno trace
+   ============================================================================ */
+/* Stats strip above the plot */
+.chart-stats { display: flex; flex-wrap: wrap; gap: 2rem; padding: 1rem 0.25rem 0.85rem; }
+.chart-stat { display: flex; flex-direction: column; gap: 0.25rem; }
+.chart-stat-label {
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 1.8px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.chart-stat-val {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-family: var(--heading);
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.chart-stat-val i { font-family: var(--mono); font-size: 0.6rem; font-style: normal; color: var(--text-muted); }
+.chart-stat-val.ice { color: var(--coolant-ice); }
+.chart-stat-val.orange { color: var(--ktm-orange); }
+.chart-stat-val em { font-family: var(--mono); font-size: 0.72rem; font-style: normal; }
+.chart-stat-val em.up { color: var(--coolant-ice); }
+.chart-stat-val em.down { color: var(--caution-amber); }
+
+.chart-container { flex: 1; width: 100%; min-height: 240px; position: relative; }
+.chart-svg { width: 100%; height: 100%; display: block; }
+
+.chart-empty {
+  display: flex; justify-content: center; align-items: center;
+  height: 100%; min-height: 240px; padding: 1rem;
+  color: var(--text-muted); font-family: var(--mono); font-size: 0.85rem; letter-spacing: 1px; text-align: center;
+}
+
+/* Gradient area fill (stop-color needs CSS so var() resolves) */
+.area-stop-top { stop-color: var(--ktm-orange); stop-opacity: 0.30; }
+.area-stop-mid { stop-color: var(--ktm-orange); stop-opacity: 0.08; }
+.area-stop-bot { stop-color: var(--ktm-orange); stop-opacity: 0; }
+.chart-area { fill: url(#mileageArea); pointer-events: none; }
+
+.chart-line {
+  fill: none;
+  stroke: var(--ktm-orange);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+  filter: drop-shadow(0 3px 10px var(--ktm-orange-glow));
+}
+.chart-grid-line { stroke: var(--border-metal); stroke-width: 1; pointer-events: none; }
+.chart-grid-line.axis { stroke: var(--border-metal-hover); }
+.chart-axis-unit { font-family: var(--mono); font-size: 9px; letter-spacing: 1px; fill: var(--text-muted); }
+.chart-crosshair { stroke: var(--ktm-orange); stroke-width: 1; stroke-dasharray: 2 4; opacity: 0.55; pointer-events: none; }
+
+.chart-point {
+  fill: var(--bg-obsidian);
+  stroke: var(--coolant-ice);
+  stroke-width: 2.5;
+  cursor: pointer;
+  transition: stroke 0.2s ease, stroke-width 0.2s ease;
+}
+.chart-point.latest { stroke: var(--ktm-orange); }
+.chart-point:hover, .chart-point.active { stroke: var(--ktm-orange); stroke-width: 3.5; }
+.chart-point-halo {
+  fill: var(--ktm-orange);
+  opacity: 0.25;
+  pointer-events: none;
+  animation: chartPulse 1.8s ease-in-out infinite;
+}
+@keyframes chartPulse { 0%, 100% { opacity: 0.28; } 50% { opacity: 0.06; } }
+
+.chart-label { font-family: var(--mono); font-size: 10px; fill: var(--text-muted); }
+.chart-tt-box {
+  fill: var(--bg-card-2);
+  stroke: var(--ktm-orange);
+  stroke-width: 1;
+  filter: drop-shadow(0 6px 14px rgba(0, 0, 0, 0.6));
+}
+.chart-tt-main { fill: var(--text-primary); font-family: var(--heading); font-size: 13px; font-weight: 600; }
+.chart-tt-sub { fill: var(--text-secondary); font-family: var(--mono); font-size: 10px; }
+
+/* ============================================================================
+   SPEC SHEET — homologation plate
+   ============================================================================ */
+/* span-12 cards from SpecsSheet resolve to exactly full width (no implicit-track overflow) */
+.specs-grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 1.4rem; }
+.spec-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+}
+.spec-item:last-child { border-bottom: none; }
+.spec-name { font-size: 0.88rem; color: var(--text-secondary); font-weight: 500; }
+.spec-val {
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+/* ============================================================================
+   DASHBOARD WIDGETS — spending bars, activity feed, cost donut
+   ============================================================================ */
+.card-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  border-bottom: 1px solid var(--border-metal);
+  padding-bottom: 0.75rem;
+  margin-bottom: 1.35rem;
+}
+.card-title { font-family: var(--heading); font-size: 1.2rem; font-weight: 600; letter-spacing: 0.3px; }
+.card-head-meta { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.5px; color: var(--text-muted); white-space: nowrap; }
+.widget-empty {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 120px; color: var(--text-muted);
+  font-family: var(--mono); font-size: 0.82rem; letter-spacing: 0.5px;
+}
+
+/* Spending breakdown bars */
+.bar-list { display: flex; flex-direction: column; justify-content: center; gap: 1.1rem; flex: 1; }
+.bar-row { display: grid; grid-template-columns: 130px 1fr auto; align-items: center; gap: 1rem; }
+.bar-label {
+  font-size: 0.85rem; color: var(--text-secondary);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bar-track { height: 10px; background: var(--bg-input); border-radius: 3px; overflow: hidden; }
+.bar-fill {
+  height: 100%; border-radius: 3px;
+  background: linear-gradient(90deg, rgba(var(--coolant-ice-rgb),0.45), var(--coolant-ice));
+  transition: width 0.6s cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+.bar-fill.fuel {
+  background: linear-gradient(90deg, var(--ktm-orange-deep), var(--ktm-orange));
+  box-shadow: 0 0 10px var(--ktm-orange-glow);
+}
+.bar-value {
+  display: flex; align-items: baseline; gap: 0.45rem;
+  font-family: var(--mono); font-size: 0.85rem; font-weight: 600; color: var(--text-primary);
+  white-space: nowrap;
+}
+.bar-value i { font-style: normal; font-size: 0.68rem; color: var(--text-muted); min-width: 32px; text-align: right; }
+
+/* Recent activity feed */
+.activity-list { display: flex; flex-direction: column; }
+.activity-row {
+  display: flex; align-items: center; gap: 1rem;
+  padding: 0.7rem 0; border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+.activity-row:last-child { border-bottom: none; }
+.activity-icon {
+  width: 36px; height: 36px; flex-shrink: 0; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+}
+.activity-icon svg { width: 17px; height: 17px; }
+.activity-icon.fuel { background: var(--ktm-orange-soft); color: var(--ktm-orange); border: 1px solid rgba(255, 90, 10, 0.25); }
+.activity-icon.maint { background: var(--coolant-ice-bg); color: var(--coolant-ice); border: 1px solid rgba(var(--coolant-ice-rgb),0.22); }
+.activity-main { display: flex; flex-direction: column; gap: 0.15rem; flex-grow: 1; min-width: 0; }
+.activity-title { font-size: 0.92rem; font-weight: 500; color: var(--text-primary); }
+.activity-sub { font-family: var(--mono); font-size: 0.72rem; color: var(--text-muted); }
+.activity-amount { font-family: var(--mono); font-size: 0.9rem; font-weight: 600; color: var(--text-primary); white-space: nowrap; }
+
+/* Cost split donut */
+.donut-panel { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 1.85rem; padding: 0.5rem 0; }
+.donut-wrap { display: flex; justify-content: center; }
+.donut { width: 186px; height: 186px; }
+.donut-track { fill: none; stroke: var(--bg-input); stroke-width: 11; }
+.donut-seg { fill: none; stroke-width: 11; transition: stroke-dasharray 0.6s ease; }
+.donut-seg.fuel { stroke: var(--ktm-orange); }
+.donut-seg.maint { stroke: var(--coolant-ice); }
+.donut-total-label { fill: var(--text-muted); font-family: var(--mono); font-size: 8px; letter-spacing: 1.5px; text-anchor: middle; }
+.donut-total { fill: var(--text-primary); font-family: var(--heading); font-size: 20px; font-weight: 700; text-anchor: middle; }
+.legend { display: flex; flex-direction: column; gap: 0.9rem; }
+.legend-row { display: grid; grid-template-columns: 12px 1fr auto auto; align-items: center; gap: 0.7rem; }
+.legend-dot { width: 11px; height: 11px; border-radius: 2px; }
+.legend-dot.fuel { background: var(--ktm-orange); }
+.legend-dot.maint { background: var(--coolant-ice); }
+.legend-name { font-size: 0.88rem; color: var(--text-secondary); }
+.legend-amt { font-family: var(--mono); font-size: 0.85rem; font-weight: 600; color: var(--text-primary); }
+.legend-pct { font-family: var(--mono); font-size: 0.78rem; font-weight: 600; color: var(--text-muted); min-width: 36px; text-align: right; }
+
+/* ============================================================================
+   MOTION
+   ============================================================================ */
+@keyframes ecuBoot {
+  0% { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+@keyframes ignitionSweep {
+  0% { transform: scaleX(0); opacity: 0; }
+  40% { opacity: 1; }
+  100% { transform: scaleX(1); opacity: 1; }
+}
+@keyframes critPulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, .card, .main-content::before, .circle.danger {
+    animation: none !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================================================
+   RESPONSIVE
+   ============================================================================ */
+@media (max-width: 768px) {
+  #root, .app-container { flex-direction: column; }
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: static;
+    padding: 1.25rem 1rem;
+    border-right: none;
+    border-bottom: 1px solid var(--border-metal);
+  }
+  .sidebar::after { display: none; }
+  .brand { margin-bottom: 1.25rem; padding-bottom: 1rem; }
+  .nav-menu { flex-direction: row; overflow-x: auto; gap: 0.25rem; padding-bottom: 0.5rem; }
+  .nav-item { padding: 0.55rem 0.8rem; font-size: 0.8rem; white-space: nowrap; }
+  .nav-item::before { display: none; }
+  .sidebar-footer { display: none; }
+  .main-content { padding: 1.25rem; width: 100%; }
+  .dashboard-grid { gap: 1rem; }
+  .dashboard-header { flex-direction: column; align-items: flex-start; gap: 1rem; }
+  .col-8, .col-4, .col-6, .col-3 { grid-column: span 12; }
+  .stat-value { font-size: 1.9rem; }
+  .form-row { grid-template-columns: 1fr; gap: 0; }
+}

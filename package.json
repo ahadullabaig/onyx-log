@@ -1,0 +1,17 @@
+{
+  "name": "ktm-duke-250-tracker",
+  "version": "1.0.0",
+  "description": "Personal mileage and maintenance tracker for KTM Duke 250 Gen 3",
+  "main": "server/server.js",
+  "scripts": {
+    "install-all": "npm install && npm install --prefix server && npm install --prefix client",
+    "server": "npm run dev --prefix server",
+    "client": "npm run dev --prefix client",
+    "dev": "concurrently \"npm run server\" \"npm run client\"",
+    "build": "npm run build --prefix client",
+    "start": "node server/server.js"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
