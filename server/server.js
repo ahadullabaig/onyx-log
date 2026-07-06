@@ -4,6 +4,7 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import crypto from 'crypto';
 import { dbRun, dbGet, dbAll, dbReady } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -52,8 +53,73 @@ const upload = multer({
   }
 });
 
+// --- Auth Helpers & Middleware ---
+let sessionSecret;
+
+function requireAuth(req, res, next) {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Authentication token required' });
+  }
+
+  try {
+    const [expiryStr, signature] = token.split('.');
+    if (!expiryStr || !signature) {
+      return res.status(401).json({ error: 'Invalid token format' });
+    }
+
+    const expiry = parseInt(expiryStr, 10);
+    if (isNaN(expiry) || expiry < Date.now()) {
+      return res.status(401).json({ error: 'Session expired' });
+    }
+
+    if (!sessionSecret) {
+      return res.status(500).json({ error: 'Auth system uninitialized' });
+    }
+
+    const expectedSig = crypto
+      .createHmac('sha256', sessionSecret)
+      .update(expiryStr)
+      .digest('hex');
+
+    if (signature !== expectedSig) {
+      return res.status(401).json({ error: 'Invalid token signature' });
+    }
+
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid token' });
+  }
+}
+
+app.post('/api/auth/login', (req, res) => {
+  const { password } = req.body;
+  const configuredPassword = process.env.ACCESS_PASSWORD || 'onyx250';
+
+  if (!process.env.ACCESS_PASSWORD) {
+    console.warn('WARNING: ACCESS_PASSWORD environment variable not set. Using default: onyx250');
+  }
+
+  if (password === configuredPassword) {
+    const expiry = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30 days
+    if (!sessionSecret) {
+      return res.status(500).json({ error: 'Server auth secret not ready' });
+    }
+    const signature = crypto
+      .createHmac('sha256', sessionSecret)
+      .update(expiry.toString())
+      .digest('hex');
+    const token = `${expiry}.${signature}`;
+    return res.json({ token });
+  } else {
+    return res.status(401).json({ error: 'Incorrect password' });
+  }
+});
+
 // File upload endpoint
-app.post('/api/upload', upload.single('bill'), (req, res) => {
+app.post('/api/upload', requireAuth, upload.single('bill'), (req, res) => {
   if (!req.file) {
     return res.status(400).json({ error: 'No file uploaded' });
   }
@@ -63,7 +129,7 @@ app.post('/api/upload', upload.single('bill'), (req, res) => {
 
 // Remove an uploaded receipt that was never attached to a saved log (avoids
 // orphaned files). basename() keeps the target strictly inside UPLOADS_DIR.
-app.delete('/api/upload/:filename', (req, res) => {
+app.delete('/api/upload/:filename', requireAuth, (req, res) => {
   const fullPath = path.join(UPLOADS_DIR, path.basename(req.params.filename));
   if (fullPath.startsWith(UPLOADS_DIR) && fs.existsSync(fullPath)) {
     fs.unlinkSync(fullPath);
@@ -82,7 +148,7 @@ async function syncOdometer(loggedOdo) {
 // ---------------- API ENDPOINTS ----------------
 
 // Get status and cost analytics
-app.get('/api/dashboard', async (req, res) => {
+app.get('/api/dashboard', requireAuth, async (req, res) => {
   try {
     const status = await dbGet('SELECT * FROM bike_status WHERE id = 1');
     const fuelStats = await dbGet('SELECT SUM(total_cost) as total_fuel, COUNT(*) as count FROM fuel_logs');
@@ -134,7 +200,7 @@ app.get('/api/dashboard', async (req, res) => {
 });
 
 // Update odometer manually or clean chain
-app.post('/api/odometer', async (req, res) => {
+app.post('/api/odometer', requireAuth, async (req, res) => {
   const { currentOdometer, lastChainCleanOdometer } = req.body;
   try {
     if (currentOdometer !== undefined) {
@@ -150,7 +216,7 @@ app.post('/api/odometer', async (req, res) => {
 });
 
 // Fuel Logs endpoints
-app.get('/api/fuel', async (req, res) => {
+app.get('/api/fuel', requireAuth, async (req, res) => {
   try {
     const logs = await dbAll('SELECT * FROM fuel_logs ORDER BY odometer DESC, date DESC');
     res.json(logs);
@@ -159,7 +225,7 @@ app.get('/api/fuel', async (req, res) => {
   }
 });
 
-app.post('/api/fuel', async (req, res) => {
+app.post('/api/fuel', requireAuth, async (req, res) => {
   const { date, odometer, liters, pricePerLiter, totalCost, fullTank } = req.body;
   
   // Presence check (== null catches null/undefined but allows a valid 0 odometer)
@@ -183,7 +249,7 @@ app.post('/api/fuel', async (req, res) => {
   }
 });
 
-app.delete('/api/fuel/:id', async (req, res) => {
+app.delete('/api/fuel/:id', requireAuth, async (req, res) => {
   try {
     await dbRun('DELETE FROM fuel_logs WHERE id = ?', [req.params.id]);
     res.json({ success: true });
@@ -193,7 +259,7 @@ app.delete('/api/fuel/:id', async (req, res) => {
 });
 
 // Maintenance Logs endpoints
-app.get('/api/maintenance', async (req, res) => {
+app.get('/api/maintenance', requireAuth, async (req, res) => {
   try {
     const logs = await dbAll('SELECT * FROM maintenance_logs ORDER BY odometer DESC, date DESC');
     res.json(logs);
@@ -202,7 +268,7 @@ app.get('/api/maintenance', async (req, res) => {
   }
 });
 
-app.post('/api/maintenance', async (req, res) => {
+app.post('/api/maintenance', requireAuth, async (req, res) => {
   const { date, odometer, category, cost, isDiy, description, billPath } = req.body;
 
   if (!date || !odometer || !category) {
@@ -237,7 +303,7 @@ app.post('/api/maintenance', async (req, res) => {
   }
 });
 
-app.delete('/api/maintenance/:id', async (req, res) => {
+app.delete('/api/maintenance/:id', requireAuth, async (req, res) => {
   try {
     // Delete linked receipt if present. Resolve strictly inside UPLOADS_DIR via
     // basename() so a crafted bill_path (e.g. "/uploads/../../etc/x") can never
@@ -276,7 +342,17 @@ app.use((err, req, res, next) => {
 });
 
 // Start Server only after the database schema is ready (avoids startup race)
-dbReady.then(() => {
+dbReady.then(async () => {
+  try {
+    const status = await dbGet('SELECT session_secret FROM bike_status WHERE id = 1');
+    sessionSecret = status?.session_secret;
+    if (!sessionSecret) {
+      console.error('CRITICAL: No session secret found in database.');
+    }
+  } catch (err) {
+    console.error('Failed to load session secret from database:', err);
+  }
+
   app.listen(PORT, () => {
     console.log(`Server is running at http://localhost:${PORT}`);
   });

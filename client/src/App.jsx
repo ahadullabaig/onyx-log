@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Fuel, Wrench, FileText } from 'lucide-react';
+import { LayoutDashboard, Fuel, Wrench, FileText, LogOut } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import FuelLog from './components/FuelLog';
 import MaintenanceLog from './components/MaintenanceLog';
 import SpecsSheet from './components/SpecsSheet';
+import Login from './components/Login';
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [authToken, setAuthToken] = useState(localStorage.getItem('onyx_auth_token'));
   const [dashboardData, setDashboardData] = useState({
     currentOdometer: 0,
     lastChainCleanOdometer: 0,
@@ -20,6 +22,33 @@ function App() {
   const [maintenanceLogs, setMaintenanceLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+
+  // Centralized fetch interceptor to inject Authorization headers and handle 401 logouts
+  useEffect(() => {
+    const originalFetch = window.fetch;
+
+    window.fetch = async (url, options = {}) => {
+      if (url.startsWith('/api/')) {
+        options.headers = {
+          ...options.headers,
+          'Authorization': `Bearer ${authToken}`
+        };
+      }
+
+      const response = await originalFetch(url, options);
+
+      if (response.status === 401 && url !== '/api/auth/login') {
+        localStorage.removeItem('onyx_auth_token');
+        setAuthToken(null);
+      }
+
+      return response;
+    };
+
+    return () => {
+      window.fetch = originalFetch;
+    };
+  }, [authToken]);
 
   const fetchData = async () => {
     try {
@@ -52,8 +81,31 @@ function App() {
   };
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    if (authToken) {
+      fetchData();
+    }
+  }, [authToken]);
+
+  const handleLoginSuccess = (token) => {
+    localStorage.setItem('onyx_auth_token', token);
+    setAuthToken(token);
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('onyx_auth_token');
+    setAuthToken(null);
+    setDashboardData({
+      currentOdometer: 0,
+      lastChainCleanOdometer: 0,
+      totalFuelCost: 0,
+      totalMaintenanceCost: 0,
+      fuelEntriesCount: 0,
+      maintenanceEntriesCount: 0,
+      averageMileage: 0
+    });
+    setFuelLogs([]);
+    setMaintenanceLogs([]);
+  };
 
   const renderContent = () => {
     if (loading && !dashboardData.currentOdometer) {
@@ -106,6 +158,10 @@ function App() {
         return <Dashboard data={dashboardData} refresh={fetchData} fuelLogs={fuelLogs} maintLogs={maintenanceLogs} />;
     }
   };
+
+  if (!authToken) {
+    return <Login onLoginSuccess={handleLoginSuccess} />;
+  }
 
   return (
     <div className="app-container">
@@ -172,6 +228,14 @@ function App() {
               </span>
             </div>
           </div>
+          <button
+            className="nav-item"
+            onClick={handleLogout}
+            style={{ background: 'none', width: '100%', textAlign: 'left', marginTop: '0.75rem', border: '1px solid transparent', color: 'var(--text-secondary)' }}
+          >
+            <LogOut className="nav-icon" />
+            LOGOUT
+          </button>
         </div>
       </aside>
 

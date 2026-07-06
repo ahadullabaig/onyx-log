@@ -2,6 +2,7 @@ import sqlite3 from 'sqlite3';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -76,9 +77,18 @@ async function initializeDatabase() {
       CREATE TABLE IF NOT EXISTS bike_status (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         current_odometer INTEGER DEFAULT 0,
-        last_chain_clean_odometer INTEGER DEFAULT 0
+        last_chain_clean_odometer INTEGER DEFAULT 0,
+        session_secret TEXT
       )
     `);
+
+    // Schema migration: add session_secret column to existing databases if missing
+    const columns = await dbAll('PRAGMA table_info(bike_status)');
+    const hasSecret = columns.some(col => col.name === 'session_secret');
+    if (!hasSecret) {
+      await dbRun('ALTER TABLE bike_status ADD COLUMN session_secret TEXT');
+      console.log('Added session_secret column to bike_status.');
+    }
 
     await dbRun(`
       CREATE TABLE IF NOT EXISTS fuel_logs (
@@ -106,11 +116,18 @@ async function initializeDatabase() {
     `);
 
     // Pre-populate single bike_status row if not present
-    const status = await dbGet('SELECT * FROM bike_status WHERE id = 1');
+    let status = await dbGet('SELECT * FROM bike_status WHERE id = 1');
     if (!status) {
-      await dbRun('INSERT INTO bike_status (id, current_odometer, last_chain_clean_odometer) VALUES (1, 0, 0)');
-      console.log('Database initialized with default bike status.');
+      const secret = crypto.randomBytes(32).toString('hex');
+      await dbRun('INSERT INTO bike_status (id, current_odometer, last_chain_clean_odometer, session_secret) VALUES (1, 0, 0, ?)', [secret]);
+      console.log('Database initialized with default bike status and session secret.');
     } else {
+      if (!status.session_secret) {
+        const secret = crypto.randomBytes(32).toString('hex');
+        await dbRun('UPDATE bike_status SET session_secret = ? WHERE id = 1', [secret]);
+        status.session_secret = secret;
+        console.log('Generated session secret for existing database.');
+      }
       console.log('Database tables verified. Current Odo:', status.current_odometer);
     }
   } catch (error) {
