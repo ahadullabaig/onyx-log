@@ -1,19 +1,22 @@
-# KTM Duke 250 Gen 3 Companion App (Tracker)
+# Onyx Log — KTM Duke 250 Gen 3 Companion
 
 A premium, localized, full-stack companion application designed specifically for tracking the maintenance logs, fuel efficiency, and technical specifications of the **KTM Duke 250 Gen 3 (2025+)** motorcycle. 
 
-The application is built with a sleek, metallic dark-tech theme (black, silver, steel, and carbon) to match the high-performance racing aesthetic of the machine. It operates entirely on your local machine with zero external cloud dependencies, storing data in an offline-first SQLite database and saving maintenance receipts directly to your local storage.
+The application is built with the custom **"Trellis" Design System** (an obsidian-black, coolant-ice, and brand KTM orange HUD theme) to match the high-performance racing instrument cluster aesthetic of the machine. It operates entirely on your local machine with zero external cloud dependencies, storing data in an offline-first SQLite database and saving maintenance receipts directly to your local storage.
 
 ---
 
-## 🚀 Key Features
+## Key Features
 
 ### 1. Garage Dashboard
 *   **Active Status Odometer**: Displays current odometer reading, total accumulated expenses (fuel vs. maintenance), and overall average fuel economy.
 *   **Dynamic SVG Status Rings**: 
-    *   *Chain Clean & Lube*: Visual circular indicator tracking mileage since the last chain clean (500 km interval). Turns amber at 400 km and flashes red at 450 km (resets with a single click).
+    *   *Chain Clean & Lube*: Visual circular indicator tracking mileage since the last chain clean (500 km interval). Turns amber at 400 km and flashes red at 450 km (resets with a single click logging a DIY maintenance entry).
     *   *Scheduled Service*: Countdown progression until the next factory-specified service interval (1st at 1,000 km, subsequently every 7,500 km).
-*   **Pre-Ride Checklist**: Dynamic checklists for checking tyre pressures (29 PSI Front / 32 PSI Rear), engine oil sight glass levels, coolant reservoir, and chain slack (33-40 mm play).
+*   **Interactive Telemetry Widgets**: 
+    *   *Spending Breakdown*: Graphical bar charts representing costs by service categories and fuel expenditure.
+    *   *Cost Split Donut*: Interactive SVG donut chart detailing fuel versus general service ratios.
+    *   *Recent Activity*: Chronological event feed displaying recent refuels and repairs.
 *   **Quick Odometer Sync**: A simple form widget to update the bike's primary odometer reading after rides.
 
 ### 2. Fuel Mileage Log
@@ -25,6 +28,7 @@ The application is built with a sleek, metallic dark-tech theme (black, silver, 
 *   **Comprehensive Log Forms**: Categorized logs (Engine Oil, Chain Maintenance, Coolant, Air Filter, Brake Pads, Tires, Spark Plug, Accessories & Mods, Other Repairs) with cost and DIY vs. Workshop toggle details.
 *   **Multer Receipt Upload**: Integrated drag-and-drop file uploader zone that accepts PNG, JPEG, JPG, and PDF receipts, saving files locally on your computer.
 *   **Interactive Receipt Viewer**: Native HTML5 `<dialog>` modals with backdrop blur and light-dismiss fallback (clicking outside the modal closes it) to view receipt scans or PDFs side-by-side with log details.
+*   **Orphan Attachment Guard**: Background cleanup logic erases temporary files from disk if the maintenance log form is closed or aborted before saving.
 
 ### 4. Technical Specs & Tightening Torques
 *   **Technical Cheat Sheet**: Fluid capacity references (e.g., 1.7L 10W-50 JASO MA2 engine oil, Motorex M3.0 OAT coolant), tyre dimensions, and factory slack tolerances.
@@ -35,7 +39,7 @@ The application is built with a sleek, metallic dark-tech theme (black, silver, 
 ## 📁 Project Directory Structure
 
 ```
-tracker/
+onyx-log/
 ├── package.json             # Root workspace coordinating client & server scripts
 ├── server/                  # Backend application
 │   ├── server.js            # Express API server & static routes
@@ -51,7 +55,7 @@ tracker/
     └── src/
         ├── main.jsx         # App bootstrapping
         ├── App.jsx          # Tab navigation and root state controller
-        ├── index.css        # CSS Custom Design system (Black/Silver theme)
+        ├── index.css        # CSS Custom Design system (Trellis theme)
         └── components/
             ├── Dashboard.jsx
             ├── FuelLog.jsx
@@ -61,7 +65,7 @@ tracker/
 
 ---
 
-## ⚙️ Setup and Installation
+## Setup and Installation
 
 ### Prerequisites
 Make sure you have [Node.js](https://nodejs.org) installed on your system.
@@ -71,7 +75,7 @@ Make sure you have [Node.js](https://nodejs.org) installed on your system.
 ### Installation
 1. Clone or navigate to the project directory:
    ```bash
-   cd /home/ahad/tracker
+   cd /home/ahad/onyx-log
    ```
 2. Install all root, backend, and frontend dependencies in a single step:
    ```bash
@@ -80,7 +84,7 @@ Make sure you have [Node.js](https://nodejs.org) installed on your system.
 
 ---
 
-## 🏃 Running the Application
+## Running the Application
 
 ### Option A: Concurrent Development Mode (Recommended for Tweaks)
 Runs the backend Express API (port 5000) and the React/Vite development server (port 5173) concurrently. Includes automatic client hot-reloads and backend server restarts on file changes.
@@ -102,7 +106,7 @@ Navigate to **`http://localhost:5000`** in your browser.
 
 ---
 
-## 📊 Database Specifications (SQLite)
+## Database Specifications (SQLite)
 
 The SQLite database file (`server/database.db`) is automatically initialized and migrates itself when you start the server for the first time.
 
@@ -137,7 +141,7 @@ Stores maintenance events and associated files.
 
 ---
 
-## 🛠️ API Documentation
+## API Documentation
 
 All API requests are sent to the local server at `http://localhost:5000/api/*`.
 
@@ -181,15 +185,24 @@ All API requests are sent to the local server at `http://localhost:5000/api/*`.
     *   *Multipart File Field:* `bill`
     *   *Action:* Uploads a receipt file (PNG, JPG, JPEG, or PDF).
     *   *Returns:* `{ filePath: "/uploads/bill-..." }`
+*   **`DELETE /api/upload/:filename`**
+    *   *Action:* Deletes a physical file from the `uploads` directory. Used to clean up orphaned receipt scans.
 
 ---
 
-## 🎨 Color Palette & Aesthetic Guidelines
+## Color Palette & Aesthetic Guidelines
 
-The app's styling uses pure **Vanilla CSS** (defined in `client/src/index.css`) utilizing the following design tokens:
+The app's styling uses pure **Vanilla CSS** (defined in `client/src/index.css`) utilizing the custom **"Trellis" Design System** tokens:
 
-- **Theme Background**: Deep obsidian-black (`#090a0d`) preventing browser light flashes.
-- **Card Styling**: Slightly lighter charcoal-grey (`#12151b`) with 1px border styling to look like milled metal components (`#252a35`).
-- **Accent Elements**: Cool silver (`#cbd5e1`) and brilliant white chrome (`#ffffff`) for active icons and text indicators.
-- **Alert Colors**: Soft greens (`#10b981`), warnings (`#f59e0b`), and danger highlights (`#ef4444`) to direct user focus to maintenance due status.
-- **Micro-Animations**: Smooth hover-state transitions on buttons and cards, glowing SVG alerts, and fade-in backdrops.
+- **Theme Background**: Deep obsidian-black (`#0a0a0c`) preventing browser light flashes, using radial gradients.
+- **Card Styling**: Charcoal-grey anodized graphite panels (`#131417` and `#171920`) with 1px border styling (`#24262d`).
+- **Identity Accent**: Brand KTM Orange (`#ff5a0a`) for keylines and active components.
+- **Status Indicators (Cold → Hot)**: 
+  - *Coolant Ice* (`rgb(79, 163, 209)`): Optimal/cool state and metrics highlight.
+  - *Caution Amber* (`#ffb020`): Advisory warnings.
+  - *Critical Red* (`#ff2e2e`): Immediate action alerts.
+- **Typography**: 
+  - *Cockpit Headers*: `Chakra Petch`
+  - *Telemetry Data*: `IBM Plex Mono`
+  - *General Body*: `IBM Plex Sans`
+- **Micro-Animations**: Staggered ECU Boot card entries, glowing SVG status rings, and smooth transition backdrops.
