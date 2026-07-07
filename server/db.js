@@ -115,6 +115,44 @@ async function initializeDatabase() {
       )
     `);
 
+    await dbRun(`
+      CREATE TABLE IF NOT EXISTS maintenance_planner (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_name TEXT NOT NULL,
+        interval_km INTEGER,
+        interval_months INTEGER,
+        last_done_date TEXT,
+        last_done_odometer INTEGER,
+        is_custom INTEGER DEFAULT 0
+      )
+    `);
+
+    // Pre-populate factory default tasks if table is empty
+    const plannerCount = await dbGet('SELECT COUNT(*) as count FROM maintenance_planner');
+    if (plannerCount && plannerCount.count === 0) {
+      const defaultTasks = [
+        ['Chain Clean & Lube', 500, 1],
+        ['Engine Oil & Oil Filter', 7500, 12],
+        ['Brake Pad Inspection', 5000, 6],
+        ['Tyre Inspection', 1000, 1],
+        ['Brake Disc Inspection', 10000, 12],
+        ['Battery Inspection', 10000, 12],
+        ['Spark Plug Inspection', 15000, 24],
+        ['Air Filter Inspection', 7500, 12],
+        ['Brake Fluid Replacement', null, 24],
+        ['Coolant Replacement', null, 24],
+        ['Fork Oil Replacement', 30000, 36],
+        ['Drive Chain & Sprocket Replacement', 25000, null]
+      ];
+      for (const [name, km, months] of defaultTasks) {
+        await dbRun(
+          'INSERT INTO maintenance_planner (task_name, interval_km, interval_months, last_done_date, last_done_odometer, is_custom) VALUES (?, ?, ?, NULL, NULL, 0)',
+          [name, km, months]
+        );
+      }
+      console.log('Pre-populated maintenance_planner with factory default tasks.');
+    }
+
     // Pre-populate single bike_status row if not present
     let status = await dbGet('SELECT * FROM bike_status WHERE id = 1');
     if (!status) {

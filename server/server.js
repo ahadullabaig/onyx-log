@@ -323,6 +323,184 @@ app.delete('/api/maintenance/:id', requireAuth, async (req, res) => {
   }
 });
 
+// --- Maintenance Planner endpoints ---
+
+app.get('/api/planner', requireAuth, async (req, res) => {
+  try {
+    const status = await dbGet('SELECT current_odometer FROM bike_status WHERE id = 1');
+    const currentOdo = status?.current_odometer || 0;
+    const tasks = await dbAll('SELECT * FROM maintenance_planner');
+    
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const calculatedTasks = tasks.map(task => {
+      let dueInKm = null;
+      let dueInDays = null;
+      let nextDueOdo = null;
+      let nextDueDate = null;
+      let isConfigured = task.last_done_date !== null && task.last_done_odometer !== null;
+
+      if (isConfigured) {
+        if (task.interval_km !== null) {
+          nextDueOdo = task.last_done_odometer + task.interval_km;
+          dueInKm = nextDueOdo - currentOdo;
+        }
+        if (task.interval_months !== null) {
+          const d = new Date(task.last_done_date);
+          d.setMonth(d.getMonth() + task.interval_months);
+          d.setHours(0, 0, 0, 0);
+          nextDueDate = d.toISOString().split('T')[0];
+          const diffTime = d.getTime() - today.getTime();
+          dueInDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+        }
+      }
+
+      let consumedPercent = 0;
+      if (isConfigured) {
+        let pctKm = 0;
+        if (task.interval_km !== null) {
+          const runDistance = currentOdo - task.last_done_odometer;
+          pctKm = (runDistance / task.interval_km) * 100;
+          pctKm = Math.max(0, Math.min(100, pctKm));
+        }
+
+        let pctDays = 0;
+        if (task.interval_months !== null) {
+          const dStart = new Date(task.last_done_date);
+          const dEnd = new Date(nextDueDate);
+          const totalDays = Math.ceil((dEnd.getTime() - dStart.getTime()) / (1000 * 60 * 60 * 24));
+          const elapsedDays = totalDays - dueInDays;
+          pctDays = totalDays > 0 ? (elapsedDays / totalDays) * 100 : 0;
+          pctDays = Math.max(0, Math.min(100, pctDays));
+        }
+
+        consumedPercent = Math.round(Math.max(pctKm, pctDays));
+      }
+
+      let taskStatus = 'Unconfigured';
+      if (isConfigured) {
+        const isOverdue = (dueInKm !== null && dueInKm <= 0) || (dueInDays !== null && dueInDays <= 0);
+        
+        let isDueSoon = false;
+        if (!isOverdue) {
+          const kmThreshold = task.interval_km && task.interval_km >= 2000 ? 500 : 100;
+          const mileageDueSoon = dueInKm !== null && dueInKm <= kmThreshold;
+          const timeDueSoon = dueInDays !== null && dueInDays <= 30;
+          isDueSoon = mileageDueSoon || timeDueSoon;
+        }
+
+        if (isOverdue) {
+          taskStatus = 'Overdue';
+        } else if (isDueSoon) {
+          taskStatus = 'Due Soon';
+        } else {
+          taskStatus = 'Upcoming';
+        }
+      }
+
+      return {
+        ...task,
+        dueInKm,
+        dueInDays,
+        nextDueOdo,
+        nextDueDate,
+        status: taskStatus,
+        consumedPercent
+      };
+    });
+
+    const statusOrder = { 'Overdue': 0, 'Due Soon': 1, 'Unconfigured': 2, 'Upcoming': 3 };
+    calculatedTasks.sort((a, b) => {
+      if (statusOrder[a.status] !== statusOrder[b.status]) {
+        return statusOrder[a.status] - statusOrder[b.status];
+      }
+      return a.task_name.localeCompare(b.task_name);
+    });
+
+    res.json({
+      currentOdometer: currentOdo,
+      tasks: calculatedTasks
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/planner', requireAuth, async (req, res) => {
+  const { taskName, intervalKm, intervalMonths, lastDoneDate, lastDoneOdometer } = req.body;
+  if (!taskName) {
+    return res.status(400).json({ error: 'Task name is required' });
+  }
+  if (intervalKm == null && intervalMonths == null) {
+    return res.status(400).json({ error: 'At least one interval (km or months) must be specified' });
+  }
+  try {
+    const result = await dbRun(
+      'INSERT INTO maintenance_planner (task_name, interval_km, interval_months, last_done_date, last_done_odometer, is_custom) VALUES (?, ?, ?, ?, ?, 1)',
+      [
+        taskName,
+        intervalKm ? parseInt(intervalKm, 10) : null,
+        intervalMonths ? parseInt(intervalMonths, 10) : null,
+        lastDoneDate || null,
+        lastDoneOdometer != null ? parseInt(lastDoneOdometer, 10) : null
+      ]
+    );
+    res.json({ id: result.id, success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.put('/api/planner/:id', requireAuth, async (req, res) => {
+  const { taskName, intervalKm, intervalMonths, lastDoneDate, lastDoneOdometer } = req.body;
+  if (!taskName) {
+    return res.status(400).json({ error: 'Task name is required' });
+  }
+  try {
+    await dbRun(
+      'UPDATE maintenance_planner SET task_name = ?, interval_km = ?, interval_months = ?, last_done_date = ?, last_done_odometer = ? WHERE id = ?',
+      [
+        taskName,
+        intervalKm ? parseInt(intervalKm, 10) : null,
+        intervalMonths ? parseInt(intervalMonths, 10) : null,
+        lastDoneDate || null,
+        lastDoneOdometer != null ? parseInt(lastDoneOdometer, 10) : null,
+        req.params.id
+      ]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/planner/:id/complete', requireAuth, async (req, res) => {
+  const { completionDate, completionOdometer } = req.body;
+  if (!completionDate || completionOdometer == null) {
+    return res.status(400).json({ error: 'Completion date and odometer are required' });
+  }
+  try {
+    await dbRun(
+      'UPDATE maintenance_planner SET last_done_date = ?, last_done_odometer = ? WHERE id = ?',
+      [completionDate, parseInt(completionOdometer, 10), req.params.id]
+    );
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.delete('/api/planner/:id', requireAuth, async (req, res) => {
+  try {
+    await dbRun('DELETE FROM maintenance_planner WHERE id = ?', [req.params.id]);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+
 // Serve frontend build in production
 const frontendBuildPath = path.join(__dirname, '..', 'client', 'dist');
 if (fs.existsSync(frontendBuildPath)) {

@@ -1,10 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { LayoutDashboard, Fuel, Wrench, FileText, LogOut } from 'lucide-react';
+import { LayoutDashboard, Fuel, Wrench, FileText, LogOut, Calendar } from 'lucide-react';
 import Dashboard from './components/Dashboard';
 import FuelLog from './components/FuelLog';
 import MaintenanceLog from './components/MaintenanceLog';
 import SpecsSheet from './components/SpecsSheet';
 import Login from './components/Login';
+import MaintenancePlanner from './components/MaintenancePlanner';
+
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -20,6 +22,7 @@ function App() {
   });
   const [fuelLogs, setFuelLogs] = useState([]);
   const [maintenanceLogs, setMaintenanceLogs] = useState([]);
+  const [plannerData, setPlannerData] = useState({ currentOdometer: 0, tasks: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -55,23 +58,26 @@ function App() {
       setLoading(true);
       setError(null);
 
-      const [dashRes, fuelRes, maintRes] = await Promise.all([
+      const [dashRes, fuelRes, maintRes, plannerRes] = await Promise.all([
         fetch('/api/dashboard'),
         fetch('/api/fuel'),
-        fetch('/api/maintenance')
+        fetch('/api/maintenance'),
+        fetch('/api/planner')
       ]);
 
-      if (!dashRes.ok || !fuelRes.ok || !maintRes.ok) {
+      if (!dashRes.ok || !fuelRes.ok || !maintRes.ok || !plannerRes.ok) {
         throw new Error('Failed to fetch data from the server.');
       }
 
       const dashData = await dashRes.json();
       const fuelData = await fuelRes.json();
       const maintData = await maintRes.json();
+      const plannerVal = await plannerRes.json();
 
       setDashboardData(dashData);
       setFuelLogs(fuelData);
       setMaintenanceLogs(maintData);
+      setPlannerData(plannerVal);
     } catch (err) {
       console.error(err);
       setError(err.message);
@@ -105,6 +111,7 @@ function App() {
     });
     setFuelLogs([]);
     setMaintenanceLogs([]);
+    setPlannerData({ currentOdometer: 0, tasks: [] });
   };
 
   const renderContent = () => {
@@ -134,6 +141,8 @@ function App() {
             refresh={fetchData}
             fuelLogs={fuelLogs}
             maintLogs={maintenanceLogs}
+            plannerData={plannerData}
+            setActiveTab={setActiveTab}
           />
         );
       case 'fuel':
@@ -152,10 +161,27 @@ function App() {
             currentOdo={dashboardData.currentOdometer}
           />
         );
+      case 'planner':
+        return (
+          <MaintenancePlanner
+            data={plannerData}
+            refresh={fetchData}
+            currentOdo={dashboardData.currentOdometer}
+          />
+        );
       case 'specs':
         return <SpecsSheet />;
       default:
-        return <Dashboard data={dashboardData} refresh={fetchData} fuelLogs={fuelLogs} maintLogs={maintenanceLogs} />;
+        return (
+          <Dashboard
+            data={dashboardData}
+            refresh={fetchData}
+            fuelLogs={fuelLogs}
+            maintLogs={maintenanceLogs}
+            plannerData={plannerData}
+            setActiveTab={setActiveTab}
+          />
+        );
     }
   };
 
@@ -202,6 +228,16 @@ function App() {
               >
                 <Wrench className="nav-icon" />
                 Maintenance Log
+              </button>
+            </li>
+            <li>
+              <button
+                className={`nav-item ${activeTab === 'planner' ? 'active' : ''}`}
+                onClick={() => setActiveTab('planner')}
+                style={{ background: 'none', width: '100%', textAlign: 'left' }}
+              >
+                <Calendar className="nav-icon" />
+                Maintenance Planner
               </button>
             </li>
             <li>

@@ -1,13 +1,12 @@
 import React, { useState } from 'react';
-import { RefreshCw, Compass, Fuel, Wrench } from 'lucide-react';
+import { RefreshCw, Fuel, Wrench, AlertTriangle } from 'lucide-react';
 
-function Dashboard({ data, refresh, fuelLogs = [], maintLogs = [] }) {
+function Dashboard({ data, refresh, fuelLogs = [], maintLogs = [], plannerData, setActiveTab }) {
   const [newOdo, setNewOdo] = useState('');
   const [updatingOdo, setUpdatingOdo] = useState(false);
 
   const {
     currentOdometer,
-    lastChainCleanOdometer,
     totalFuelCost,
     totalMaintenanceCost,
     averageMileage,
@@ -43,33 +42,8 @@ function Dashboard({ data, refresh, fuelLogs = [], maintLogs = [] }) {
   const fmtK = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(Math.round(n)));
   const inr = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 
-  // Chain Clean logic (Due every 500 km)
-  const chainCleanInterval = 500;
-  const kmSinceLastClean = Math.max(0, currentOdometer - lastChainCleanOdometer);
-  const chainPercent = Math.min(100, (kmSinceLastClean / chainCleanInterval) * 100);
-
-  let chainStatus = 'success';
-  if (kmSinceLastClean >= 450) chainStatus = 'danger';
-  else if (kmSinceLastClean >= 400) chainStatus = 'warning';
-
-  // Service Interval logic (1st at 1000 km, subsequent every 7500 km)
-  const getNextServiceOdo = (odo) => {
-    if (odo < 1000) return 1000;
-    const base = odo - 1000;
-    const cycles = Math.floor(base / 7500) + 1;
-    return 1000 + cycles * 7500;
-  };
-
-  const nextServiceOdo = getNextServiceOdo(currentOdometer);
-  const kmUntilNextService = Math.max(0, nextServiceOdo - currentOdometer);
-  // Denominator must be the *current* interval: 1000 km before the first service,
-  // 7500 km after — otherwise the ring reads ~87% "elapsed" on a brand-new bike.
-  const serviceInterval = currentOdometer < 1000 ? 1000 : 7500;
-  const servicePercent = Math.min(100, (kmUntilNextService / serviceInterval) * 100);
-
-  let serviceStatus = 'success';
-  if (kmUntilNextService <= 500) serviceStatus = 'danger';
-  else if (kmUntilNextService <= 1000) serviceStatus = 'warning';
+  // Get top 3 urgent tasks from planner data
+  const urgentTasks = (plannerData?.tasks || []).slice(0, 3);
 
   const handleUpdateOdometer = async (e) => {
     e.preventDefault();
@@ -96,35 +70,6 @@ function Dashboard({ data, refresh, fuelLogs = [], maintLogs = [] }) {
     }
   };
 
-  const handleLogChainClean = async () => {
-    if (confirm('Mark chain as cleaned and lubed at current odometer?')) {
-      try {
-        const res = await fetch('/api/maintenance', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            date: new Date().toISOString().split('T')[0],
-            odometer: currentOdometer,
-            category: 'Chain Maintenance',
-            cost: 0,
-            isDiy: true,
-            description: 'Regular chain cleaning and lubing.'
-          })
-        });
-
-        if (!res.ok) throw new Error('Failed to log chain maintenance');
-        refresh();
-      } catch (err) {
-        alert(err.message);
-      }
-    }
-  };
-
-  // SVG dash offset helpers
-  const radius = 30;
-  const circumference = 2 * Math.PI * radius;
-  const getStrokeDashoffset = (percent) => circumference - (percent / 100) * circumference;
-
   // Donut geometry (cost split)
   const donutR = 46;
   const donutC = 2 * Math.PI * donutR;
@@ -138,6 +83,7 @@ function Dashboard({ data, refresh, fuelLogs = [], maintLogs = [] }) {
         </div>
         <button className="btn btn-secondary" onClick={refresh} style={{ padding: '0.6rem 1rem' }}>
           <RefreshCw className="btn-icon" />
+
           Refresh Stats
         </button>
       </div>
@@ -182,106 +128,105 @@ function Dashboard({ data, refresh, fuelLogs = [], maintLogs = [] }) {
           </span>
         </div>
 
-        {/* ---- Chain Care ring ---- */}
-        <div className="card col-6" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <h2 style={{ fontFamily: 'var(--heading)', fontSize: '1.2rem', borderBottom: '1px solid var(--border-metal)', paddingBottom: '0.75rem' }}>
-            Chain Care
-          </h2>
-
-          <div className="status-ring-container">
-            <svg viewBox="0 0 80 80" className="circular-chart">
-              <circle className="circle-bg" cx="40" cy="40" r={radius} />
-              <circle
-                className={`circle ${chainStatus}`}
-                cx="40"
-                cy="40"
-                r={radius}
-                strokeDasharray={`${circumference} ${circumference}`}
-                strokeDashoffset={getStrokeDashoffset(chainPercent)}
-                transform="rotate(-90 40 40)"
-              />
-            </svg>
-            <div className="status-info">
-              <span className="status-title">
-                {kmSinceLastClean} / {chainCleanInterval} km
-              </span>
-              <span className="status-desc">
-                {kmSinceLastClean >= chainCleanInterval
-                  ? 'Chain clean is OVERDUE! Lube immediately.'
-                  : `Next chain clean due in ${chainCleanInterval - kmSinceLastClean} km.`}
-              </span>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: '1rem', marginTop: 'auto' }}>
-            <button className="btn btn-primary" onClick={handleLogChainClean} style={{ flexGrow: 1 }}>
-              Mark Cleaned & Lubed
+        {/* ---- Maintenance Priority Alerts ---- */}
+        <div className="card col-8" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-metal)', paddingBottom: '0.75rem' }}>
+            <h2 style={{ fontFamily: 'var(--heading)', fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Wrench style={{ color: 'var(--ktm-orange)' }} />
+              Maintenance Priority Alerts
+            </h2>
+            <button 
+              className="btn btn-secondary" 
+              onClick={() => setActiveTab('planner')}
+              style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+            >
+              Open Planner
             </button>
           </div>
-        </div>
 
-        {/* ---- Service Interval ring ---- */}
-        <div className="card col-6" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-          <h2 style={{ fontFamily: 'var(--heading)', fontSize: '1.2rem', borderBottom: '1px solid var(--border-metal)', paddingBottom: '0.75rem' }}>
-            Service Intervals
-          </h2>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', flexGrow: 1, justifyContent: 'center' }}>
+            {urgentTasks.length === 0 ? (
+              <div className="widget-empty" style={{ margin: 0, padding: '1rem' }}>All systems nominal. No alerts.</div>
+            ) : (
+              urgentTasks.map(task => {
+                const isOverdue = task.status === 'Overdue';
+                const isDueSoon = task.status === 'Due Soon';
+                const isUnconfigured = task.status === 'Unconfigured';
+                
+                let alertColor = 'var(--text-secondary)';
+                let alertBg = 'rgba(201, 195, 180, 0.05)';
+                let alertBorder = '1px solid var(--border-metal)';
+                let dueText = '';
 
-          <div className="status-ring-container">
-            <svg viewBox="0 0 80 80" className="circular-chart">
-              <circle className="circle-bg" cx="40" cy="40" r={radius} />
-              <circle
-                className={`circle ${serviceStatus}`}
-                cx="40"
-                cy="40"
-                r={radius}
-                strokeDasharray={`${circumference} ${circumference}`}
-                strokeDashoffset={getStrokeDashoffset(100 - servicePercent)}
-                transform="rotate(-90 40 40)"
-              />
-            </svg>
-            <div className="status-info">
-              <span className="status-title">
-                Next Service: {nextServiceOdo.toLocaleString()} km
-              </span>
-              <span className="status-desc">
-                {kmUntilNextService <= 0
-                  ? 'Scheduled service is OVERDUE!'
-                  : `Service scheduled in ${kmUntilNextService.toLocaleString()} km.`}
-              </span>
-            </div>
-          </div>
+                if (isOverdue) {
+                  alertColor = 'var(--critical-red)';
+                  alertBg = 'var(--critical-red-bg)';
+                  alertBorder = '1px solid rgba(255, 46, 46, 0.2)';
+                  if (task.dueInKm !== null && task.dueInKm <= 0) {
+                    dueText = `Overdue by ${Math.abs(task.dueInKm).toLocaleString()} km`;
+                  } else if (task.dueInDays !== null && task.dueInDays <= 0) {
+                    dueText = `Overdue by ${Math.abs(task.dueInDays)} days`;
+                  } else {
+                    dueText = 'Overdue';
+                  }
+                } else if (isDueSoon) {
+                  alertColor = 'var(--caution-amber)';
+                  alertBg = 'var(--caution-amber-bg)';
+                  alertBorder = '1px solid rgba(255, 176, 32, 0.2)';
+                  if (task.dueInKm !== null && task.dueInKm <= 500) {
+                    dueText = `Due in ${task.dueInKm.toLocaleString()} km`;
+                  } else if (task.dueInDays !== null) {
+                    dueText = `Due in ${task.dueInDays} days`;
+                  } else {
+                    dueText = 'Due Soon';
+                  }
+                } else if (isUnconfigured) {
+                  alertColor = 'var(--caution-amber)';
+                  alertBg = 'rgba(255, 176, 32, 0.05)';
+                  alertBorder = '1px solid rgba(255, 176, 32, 0.15)';
+                  dueText = 'Set Baseline';
+                } else {
+                  alertColor = 'var(--coolant-ice)';
+                  alertBg = 'var(--coolant-ice-bg)';
+                  alertBorder = '1px solid rgba(79, 163, 209, 0.15)';
+                  if (task.dueInKm !== null && task.dueInDays !== null) {
+                    dueText = `${task.dueInKm.toLocaleString()} km / ${task.dueInDays} days left`;
+                  } else if (task.dueInKm !== null) {
+                    dueText = `${task.dueInKm.toLocaleString()} km left`;
+                  } else if (task.dueInDays !== null) {
+                    dueText = `${task.dueInDays} days left`;
+                  }
+                }
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--text-secondary)', fontSize: '0.85rem', marginTop: 'auto' }}>
-            <Compass className="btn-icon" />
-            <span>KTM official manual schedule: First at 1k km, then every 7.5k km.</span>
-          </div>
-        </div>
-
-        {/* ---- Spending breakdown (bar chart) ---- */}
-        <div className="card col-8" style={{ display: 'flex', flexDirection: 'column' }}>
-          <div className="card-head">
-            <span className="card-title">Spending Breakdown</span>
-            <span className="card-head-meta">₹{inr(totalCost)} total</span>
-          </div>
-          {spendByCategory.length === 0 ? (
-            <div className="widget-empty">No spending recorded yet.</div>
-          ) : (
-            <div className="bar-list">
-              {spendByCategory.map(row => {
-                const pct = maxSpend > 0 ? (row.cost / maxSpend) * 100 : 0;
-                const share = totalCost > 0 ? (row.cost / totalCost) * 100 : 0;
                 return (
-                  <div className="bar-row" key={row.name}>
-                    <span className="bar-label">{row.name}</span>
-                    <div className="bar-track">
-                      <div className={`bar-fill ${row.kind}`} style={{ width: `${Math.max(pct, 2)}%` }} />
+                  <div 
+                    key={task.id} 
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0.75rem 1rem',
+                      background: alertBg,
+                      border: alertBorder,
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                    onClick={() => setActiveTab('planner')}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                      <AlertTriangle style={{ width: '15px', height: '15px', color: alertColor }} />
+                      <span style={{ fontWeight: '500', fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                        {task.task_name}
+                      </span>
                     </div>
-                    <span className="bar-value">₹{inr(row.cost)}<i>{share.toFixed(0)}%</i></span>
+                    <span style={{ fontFamily: 'var(--mono)', fontSize: '0.85rem', fontWeight: 'bold', color: alertColor }}>
+                      {dueText}
+                    </span>
                   </div>
                 );
-              })}
-            </div>
-          )}
+              })
+            )}
+          </div>
         </div>
 
         {/* ---- Update odometer ---- */}
@@ -317,28 +262,29 @@ function Dashboard({ data, refresh, fuelLogs = [], maintLogs = [] }) {
           </form>
         </div>
 
-        {/* ---- Recent activity feed ---- */}
-        <div className="card col-8">
+        {/* ---- Spending breakdown (bar chart) ---- */}
+        <div className="card col-8" style={{ display: 'flex', flexDirection: 'column' }}>
           <div className="card-head">
-            <span className="card-title">Recent Activity</span>
-            <span className="card-head-meta">Last {recent.length} events</span>
+            <span className="card-title">Spending Breakdown</span>
+            <span className="card-head-meta">₹{inr(totalCost)} total</span>
           </div>
-          {recent.length === 0 ? (
-            <div className="widget-empty">No activity logged yet.</div>
+          {spendByCategory.length === 0 ? (
+            <div className="widget-empty">No spending recorded yet.</div>
           ) : (
-            <div className="activity-list">
-              {recent.map((a, i) => (
-                <div className="activity-row" key={i}>
-                  <span className={`activity-icon ${a.type}`}>
-                    {a.type === 'fuel' ? <Fuel /> : <Wrench />}
-                  </span>
-                  <div className="activity-main">
-                    <span className="activity-title">{a.title}</span>
-                    <span className="activity-sub">{a.date} · {a.odo.toLocaleString()} km · {a.sub}</span>
+            <div className="bar-list">
+              {spendByCategory.map(row => {
+                const pct = maxSpend > 0 ? (row.cost / maxSpend) * 100 : 0;
+                const share = totalCost > 0 ? (row.cost / totalCost) * 100 : 0;
+                return (
+                  <div className="bar-row" key={row.name}>
+                    <span className="bar-label">{row.name}</span>
+                    <div className="bar-track">
+                      <div className={`bar-fill ${row.kind}`} style={{ width: `${Math.max(pct, 2)}%` }} />
+                    </div>
+                    <span className="bar-value">₹{inr(row.cost)}<i>{share.toFixed(0)}%</i></span>
                   </div>
-                  <span className="activity-amount">₹{inr(a.amount)}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -384,6 +330,32 @@ function Dashboard({ data, refresh, fuelLogs = [], maintLogs = [] }) {
                   <span className="legend-pct">{((1 - fuelFrac) * 100).toFixed(0)}%</span>
                 </div>
               </div>
+            </div>
+          )}
+        </div>
+
+        {/* ---- Recent activity feed (Spans 12 columns) ---- */}
+        <div className="card col-12">
+          <div className="card-head">
+            <span className="card-title">Recent Activity</span>
+            <span className="card-head-meta">Last {recent.length} events</span>
+          </div>
+          {recent.length === 0 ? (
+            <div className="widget-empty">No activity logged yet.</div>
+          ) : (
+            <div className="activity-list">
+              {recent.map((a, i) => (
+                <div className="activity-row" key={i}>
+                  <span className={`activity-icon ${a.type}`}>
+                    {a.type === 'fuel' ? <Fuel /> : <Wrench />}
+                  </span>
+                  <div className="activity-main">
+                    <span className="activity-title">{a.title}</span>
+                    <span className="activity-sub">{a.date} · {a.odo.toLocaleString()} km · {a.sub}</span>
+                  </div>
+                  <span className="activity-amount">₹{inr(a.amount)}</span>
+                </div>
+              ))}
             </div>
           )}
         </div>
