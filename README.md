@@ -10,27 +10,31 @@ The application is built with the custom **"Trellis" Design System** (an obsidia
 
 ### 1. Garage Dashboard
 *   **Active Status Odometer**: Displays current odometer reading, total accumulated expenses (fuel vs. maintenance), and overall average fuel economy.
-*   **Dynamic SVG Status Rings**: 
-    *   *Chain Clean & Lube*: Visual circular indicator tracking mileage since the last chain clean (500 km interval). Turns amber at 400 km and flashes red at 450 km (resets with a single click logging a DIY maintenance entry).
-    *   *Scheduled Service*: Countdown progression until the next factory-specified service interval (1st at 1,000 km, subsequently every 7,500 km).
+*   **Maintenance Priority Alerts**: Summarizes the top 3 most urgent tasks (Overdue or Due Soon) from your periodic checklist with visual hazard badges (red, amber, or ice blue) and a direct link to the Planner panel.
 *   **Interactive Telemetry Widgets**: 
     *   *Spending Breakdown*: Graphical bar charts representing costs by service categories and fuel expenditure.
     *   *Cost Split Donut*: Interactive SVG donut chart detailing fuel versus general service ratios.
     *   *Recent Activity*: Chronological event feed displaying recent refuels and repairs.
-*   **Quick Odometer Sync**: A simple form widget to update the bike's primary odometer reading after rides.
+*   **Quick Odometer Sync**: A simple form widget to update the bike's primary odometer reading after rides (instantly synchronizing all planner status thresholds).
 
 ### 2. Fuel Mileage Log
 *   **Log Entries**: Date, odometer reading, liters filled, price per liter, and total cost.
 *   **Smart Fuel Economy Calculation**: Automatically computes **km/L** using the standard **full-to-full** fill-up method (total distance run between full fills divided by fuel added). Handles partial fills by carrying over the volume.
-*   **Custom SVG Mileage Graph**: Interactive, lightweight line-chart plotting fuel economy trends over time with hover-activated data tooltips. No heavy external graphing packages are used.
+*   **Custom SVG Mileage Graph**: Interactive, lightweight line-chart plotting fuel economy trends over time with hover-activated data data tooltips. No heavy external graphing packages are used.
 
-### 3. Maintenance timeline & Receipt Storage
+### 3. Maintenance Timeline & Receipt Storage
 *   **Comprehensive Log Forms**: Categorized logs (Engine Oil, Chain Maintenance, Coolant, Air Filter, Brake Pads, Tires, Spark Plug, Accessories & Mods, Other Repairs) with cost and DIY vs. Workshop toggle details.
 *   **Multer Receipt Upload**: Integrated drag-and-drop file uploader zone that accepts PNG, JPEG, JPG, and PDF receipts, saving files locally on your computer.
 *   **Interactive Receipt Viewer**: Native HTML5 `<dialog>` modals with backdrop blur and light-dismiss fallback (clicking outside the modal closes it) to view receipt scans or PDFs side-by-side with log details.
 *   **Orphan Attachment Guard**: Background cleanup logic erases temporary files from disk if the maintenance log form is closed or aborted before saving.
 
-### 4. Technical Specs & Tightening Torques
+### 4. Maintenance Planner & Checklist
+*   **Categorized Checklists**: Dynamically groups tasks into logical folders: **CHAIN CARE** (⛓), **ENGINE & COOLING** (🛢), **BRAKES** (🛑), **TYRES** (🛞), **SUSPENSION** (🔧), and **ELECTRICAL** (🔋) to match typical service workflows.
+*   **Dual-Interval Consumption Indicators**: Supports mileage intervals, time-based intervals (months), or both. Renders premium horizontal progress bars showing the exact percentage consumed.
+*   **Preconfigured Factory Defaults**: Pre-populated with 12 KTM Duke 250 factory manual settings (e.g. Chain Clean & Lube at 500 km/1 month, Engine Oil at 7,500 km/12 months, Brake Pad Inspection at 5,000 km/6 months, Tyre Inspection at 1,000 km/1 month, time-only replacements like Coolant/Brake Fluid at 24 months, etc.).
+*   **Interactive Baselines & Custom Tasks**: Setup/edit completion milestones using dialog forms, mark tasks completed, or add/delete custom user-defined maintenance tasks.
+
+### 5. Technical Specs & Tightening Torques
 *   **Technical Cheat Sheet**: Fluid capacity references (e.g., 1.7L 10W-50 JASO MA2 engine oil, Motorex M3.0 OAT coolant), tyre dimensions, and factory slack tolerances.
 *   **Torque Reference Card**: Mapped torque values in Newton-meters (Nm) for common garage tasks (rear axle nut, oil drain plugs, caliper bolts, spark plugs) to ensure safe DIY servicing without damaging soft aluminum threads.
 
@@ -117,6 +121,7 @@ Tracks the current state of the motorcycle. Only contains a single row with `id 
 - `id` (INTEGER, Primary Key, enforced constant)
 - `current_odometer` (INTEGER, default 0): Current odometer of the bike.
 - `last_chain_clean_odometer` (INTEGER, default 0): The odometer reading at which the chain was last cleaned.
+- `session_secret` (TEXT): Session key for security verification.
 
 #### 2. `fuel_logs`
 Stores refueling entries.
@@ -139,6 +144,16 @@ Stores maintenance events and associated files.
 - `description` (TEXT)
 - `bill_path` (TEXT, path to uploaded receipt file)
 
+#### 4. `maintenance_planner`
+Stores periodic service checklist tasks, intervals, and completion baselines.
+- `id` (INTEGER, Primary Key AUTOINCREMENT)
+- `task_name` (TEXT)
+- `interval_km` (INTEGER, nullable)
+- `interval_months` (INTEGER, nullable)
+- `last_done_date` (TEXT, nullable)
+- `last_done_odometer` (INTEGER, nullable)
+- `is_custom` (INTEGER, default 0: 0 for factory defaults, 1 for user-defined tasks)
+
 ---
 
 ## API Documentation
@@ -147,23 +162,22 @@ All API requests are sent to the local server at `http://localhost:5000/api/*`.
 
 ### Dashboard
 *   **`GET /api/dashboard`**
-    *   *Returns:* Dashboard statistics including current odo, last chain clean odo, total costs, and average mileage.
+    *   *Returns:* Dashboard statistics including current odo, total costs, and average mileage.
     *   *Response Format:*
         ```json
         {
-          "currentOdometer": 1500,
-          "lastChainCleanOdometer": 1000,
-          "totalFuelCost": 3500.50,
-          "totalMaintenanceCost": 1200.00,
-          "fuelEntriesCount": 3,
-          "maintenanceEntriesCount": 2,
-          "averageMileage": 32.45
+          "currentOdometer": 5230,
+          "totalFuelCost": 12890.50,
+          "totalMaintenanceCost": 3600.00,
+          "fuelEntriesCount": 11,
+          "maintenanceEntriesCount": 6,
+          "averageMileage": 33.45
         }
         ```
 
 ### Odometer Status
 *   **`POST /api/odometer`**
-    *   *Body Parameters:* `{ currentOdometer?: number, lastChainCleanOdometer?: number }`
+    *   *Body Parameters:* `{ currentOdometer?: number }`
     *   *Action:* Updates active odometer metrics manually.
 
 ### Fuel Logs
@@ -177,8 +191,22 @@ All API requests are sent to the local server at `http://localhost:5000/api/*`.
 *   **`GET /api/maintenance`**: Returns all maintenance logs sorted descending by odometer.
 *   **`POST /api/maintenance`**
     *   *Body Parameters:* `{ date: string, odometer: number, category: string, cost?: number, isDiy?: boolean, description?: string, billPath?: string }`
-    *   *Action:* Saves maintenance log. Synchronizes primary odometer, and if the category is `'Chain Maintenance'`, updates `last_chain_clean_odometer` as well.
+    *   *Action:* Saves maintenance log. Synchronizes primary odometer.
 *   **`DELETE /api/maintenance/:id`**: Deletes log entry and deletes the linked uploaded physical receipt file from disk.
+
+### Maintenance Planner
+*   **`GET /api/planner`**
+    *   *Returns:* Current odometer and all checklist tasks (including calculated remaining mileage/days, urgency statuses, and consumed life percentages).
+*   **`POST /api/planner`**
+    *   *Body Parameters:* `{ taskName: string, intervalKm?: number, intervalMonths?: number, lastDoneDate?: string, lastDoneOdometer?: number }`
+    *   *Action:* Saves a custom checklist task.
+*   **`PUT /api/planner/:id`**
+    *   *Body Parameters:* `{ taskName: string, intervalKm?: number, intervalMonths?: number, lastDoneDate?: string, lastDoneOdometer?: number }`
+    *   *Action:* Edits task attributes.
+*   **`POST /api/planner/:id/complete`**
+    *   *Body Parameters:* `{ completionDate: string, completionOdometer: number }`
+    *   *Action:* Records a completion baseline for the task.
+*   **`DELETE /api/planner/:id`**: Deletes a custom checklist task.
 
 ### File Uploads
 *   **`POST /api/upload`**
