@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Trash2, Edit2, CheckCircle2, X, Calendar, Gauge } from 'lucide-react';
+import { apiFetch } from '../api';
 
 function MaintenancePlanner({ data, refresh, currentOdo }) {
   const { tasks = [] } = data;
@@ -65,10 +66,8 @@ function MaintenancePlanner({ data, refresh, currentOdo }) {
     .map(key => ({ key, ...categoriesMap[key] }))
     .filter(cat => cat.tasks.length > 0);
 
-  const statusOrder = { 'Overdue': 0, 'Due Soon': 1, 'Unconfigured': 2, 'Upcoming': 3 };
-  orderedCategories.forEach(cat => {
-    cat.tasks.sort((a, b) => statusOrder[a.status] - statusOrder[b.status] || a.task_name.localeCompare(b.task_name));
-  });
+  // Tasks arrive pre-sorted (status, then name) from the server; pushing them
+  // into category buckets above preserves that order, so no re-sort is needed.
 
   // Modals state
   const [activeTask, setActiveTask] = useState(null); // task currently being completed or edited
@@ -141,7 +140,7 @@ function MaintenancePlanner({ data, refresh, currentOdo }) {
 
     try {
       if (modalMode === 'add') {
-        const res = await fetch('/api/planner', {
+        const res = await apiFetch('/api/planner', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -154,7 +153,7 @@ function MaintenancePlanner({ data, refresh, currentOdo }) {
         });
         if (!res.ok) throw new Error('Failed to create planner task');
       } else if (modalMode === 'edit') {
-        const res = await fetch(`/api/planner/${activeTask.id}`, {
+        const res = await apiFetch(`/api/planner/${activeTask.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -167,7 +166,7 @@ function MaintenancePlanner({ data, refresh, currentOdo }) {
         });
         if (!res.ok) throw new Error('Failed to update planner task');
       } else if (modalMode === 'complete') {
-        const res = await fetch(`/api/planner/${activeTask.id}/complete`, {
+        const res = await apiFetch(`/api/planner/${activeTask.id}/complete`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -190,7 +189,7 @@ function MaintenancePlanner({ data, refresh, currentOdo }) {
   const handleDelete = async (id) => {
     if (confirm('Are you sure you want to delete this task from the planner?')) {
       try {
-        const res = await fetch(`/api/planner/${id}`, {
+        const res = await apiFetch(`/api/planner/${id}`, {
           method: 'DELETE'
         });
         if (!res.ok) throw new Error('Failed to delete planner task');
@@ -223,12 +222,10 @@ function MaintenancePlanner({ data, refresh, currentOdo }) {
       };
     }
     if (task.status === 'Due Soon') {
-      let reason = 'Due Soon';
-      if (task.dueInKm !== null && task.dueInKm <= 100) {
-        reason = `Due in ${task.dueInKm} km`;
-      } else if (task.dueInDays !== null) {
-        reason = `Due in ${task.dueInDays} days`;
-      }
+      const parts = [];
+      if (task.dueInKm !== null) parts.push(`${task.dueInKm.toLocaleString()} km`);
+      if (task.dueInDays !== null) parts.push(`${task.dueInDays} days`);
+      const reason = parts.length ? `Due in ${parts.join(' / ')}` : 'Due Soon';
       return {
         badgeStyle: { backgroundColor: 'var(--caution-amber-bg)', color: 'var(--caution-amber)', border: '1px solid rgba(255, 176, 32, 0.25)' },
         text: reason,

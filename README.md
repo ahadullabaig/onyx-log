@@ -31,7 +31,7 @@ The application is built with the custom **"Trellis" Design System** (an obsidia
 ### 4. Maintenance Planner & Checklist
 *   **Categorized Checklists**: Dynamically groups tasks into logical folders: **CHAIN CARE** (⛓), **ENGINE & COOLING** (🛢), **BRAKES** (🛑), **TYRES** (🛞), **SUSPENSION** (🔧), and **ELECTRICAL** (🔋) to match typical service workflows.
 *   **Dual-Interval Consumption Indicators**: Supports mileage intervals, time-based intervals (months), or both. Renders premium horizontal progress bars showing the exact percentage consumed.
-*   **Preconfigured Factory Defaults**: Pre-populated with 12 KTM Duke 250 factory manual settings (e.g. Chain Clean & Lube at 500 km/1 month, Engine Oil at 7,500 km/12 months, Brake Pad Inspection at 5,000 km/6 months, Tyre Inspection at 1,000 km/1 month, time-only replacements like Coolant/Brake Fluid at 24 months, etc.).
+*   **Preconfigured Factory Defaults**: Pre-populated with 11 KTM Duke 250 factory manual settings (e.g. Chain Clean & Lube at 500 km/1 month, Engine Oil at 7,500 km/12 months, Brake Pad Inspection at 5,000 km/6 months, time-only replacements like Coolant/Brake Fluid at 24 months, etc.).
 *   **Interactive Baselines & Custom Tasks**: Setup/edit completion milestones using dialog forms, mark tasks completed, or add/delete custom user-defined maintenance tasks.
 
 ### 5. Technical Specs & Tightening Torques
@@ -46,8 +46,9 @@ The application is built with the custom **"Trellis" Design System** (an obsidia
 onyx-log/
 ├── package.json             # Root workspace coordinating client & server scripts
 ├── server/                  # Backend application
-│   ├── server.js            # Express API server & static routes
+│   ├── server.js            # Express API server, auth, uploads & static routes
 │   ├── db.js                # SQLite connection and migration setup
+│   ├── fuelEconomy.js       # Shared full-to-full fuel-economy calculation
 │   ├── database.db          # SQLite database storage (generated on start)
 │   ├── uploads/             # Stores physical receipt scans and PDF attachments
 │   ├── package.json         # Backend Node package specifications
@@ -58,12 +59,15 @@ onyx-log/
     ├── index.html           # Main entry document
     └── src/
         ├── main.jsx         # App bootstrapping
-        ├── App.jsx          # Tab navigation and root state controller
+        ├── App.jsx          # Auth gate, tab navigation and root state controller
+        ├── api.js           # Auth-aware fetch client (token + 401 handling)
         ├── index.css        # CSS Custom Design system (Trellis theme)
         └── components/
+            ├── Login.jsx            # Access-code gate
             ├── Dashboard.jsx
             ├── FuelLog.jsx
             ├── MaintenanceLog.jsx
+            ├── MaintenancePlanner.jsx
             └── SpecsSheet.jsx
 ```
 
@@ -110,6 +114,27 @@ Navigate to **`http://localhost:5000`** in your browser.
 
 ---
 
+## Authentication
+
+The cockpit is gated by a single shared access code. On login the server issues a
+signed, 30-day HMAC token (`expiry.signature`) that the client stores in
+`localStorage` and sends as a `Bearer` token on every `/api` request; protected
+`/uploads` assets accept the same token via a `?token=` query parameter. All API
+routes except `POST /api/auth/login` require a valid token.
+
+Set the access code with the `ACCESS_PASSWORD` environment variable. If it is
+unset, the server falls back to the default `onyx250` and logs a warning — **always
+set a strong `ACCESS_PASSWORD` for any non-local deployment.**
+
+### Environment Variables
+| Variable | Default | Purpose |
+|---|---|---|
+| `PORT` | `5000` | Port the Express server listens on. |
+| `DATA_DIR` | `server/` | Directory for `database.db` and `uploads/` (set to `/data` in production). |
+| `ACCESS_PASSWORD` | `onyx250` | Shared access code for the login screen. |
+
+---
+
 ## Database Specifications (SQLite)
 
 The SQLite database file (`server/database.db`) is automatically initialized and migrates itself when you start the server for the first time.
@@ -120,8 +145,7 @@ The SQLite database file (`server/database.db`) is automatically initialized and
 Tracks the current state of the motorcycle. Only contains a single row with `id = 1`.
 - `id` (INTEGER, Primary Key, enforced constant)
 - `current_odometer` (INTEGER, default 0): Current odometer of the bike.
-- `last_chain_clean_odometer` (INTEGER, default 0): The odometer reading at which the chain was last cleaned.
-- `session_secret` (TEXT): Session key for security verification.
+- `session_secret` (TEXT): Random per-install HMAC key used to sign session tokens.
 
 #### 2. `fuel_logs`
 Stores refueling entries.

@@ -6,52 +6,33 @@ import MaintenanceLog from './components/MaintenanceLog';
 import SpecsSheet from './components/SpecsSheet';
 import Login from './components/Login';
 import MaintenancePlanner from './components/MaintenancePlanner';
+import { apiFetch, getToken, setToken, clearToken, UNAUTHORIZED_EVENT } from './api';
 
+const EMPTY_DASHBOARD = {
+  currentOdometer: 0,
+  totalFuelCost: 0,
+  totalMaintenanceCost: 0,
+  fuelEntriesCount: 0,
+  maintenanceEntriesCount: 0,
+  averageMileage: 0
+};
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const [authToken, setAuthToken] = useState(localStorage.getItem('onyx_auth_token'));
-  const [dashboardData, setDashboardData] = useState({
-    currentOdometer: 0,
-    lastChainCleanOdometer: 0,
-    totalFuelCost: 0,
-    totalMaintenanceCost: 0,
-    fuelEntriesCount: 0,
-    maintenanceEntriesCount: 0,
-    averageMileage: 0
-  });
+  const [authToken, setAuthToken] = useState(getToken());
+  const [dashboardData, setDashboardData] = useState(EMPTY_DASHBOARD);
   const [fuelLogs, setFuelLogs] = useState([]);
   const [maintenanceLogs, setMaintenanceLogs] = useState([]);
   const [plannerData, setPlannerData] = useState({ currentOdometer: 0, tasks: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Centralized fetch interceptor to inject Authorization headers and handle 401 logouts
+  // Drop back to the login screen when apiFetch reports the token was rejected.
   useEffect(() => {
-    const originalFetch = window.fetch;
-
-    window.fetch = async (url, options = {}) => {
-      if (url.startsWith('/api/')) {
-        options.headers = {
-          ...options.headers,
-          'Authorization': `Bearer ${authToken}`
-        };
-      }
-
-      const response = await originalFetch(url, options);
-
-      if (response.status === 401 && url !== '/api/auth/login') {
-        localStorage.removeItem('onyx_auth_token');
-        setAuthToken(null);
-      }
-
-      return response;
-    };
-
-    return () => {
-      window.fetch = originalFetch;
-    };
-  }, [authToken]);
+    const onUnauthorized = () => setAuthToken(null);
+    window.addEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+    return () => window.removeEventListener(UNAUTHORIZED_EVENT, onUnauthorized);
+  }, []);
 
   const fetchData = async () => {
     try {
@@ -59,10 +40,10 @@ function App() {
       setError(null);
 
       const [dashRes, fuelRes, maintRes, plannerRes] = await Promise.all([
-        fetch('/api/dashboard'),
-        fetch('/api/fuel'),
-        fetch('/api/maintenance'),
-        fetch('/api/planner')
+        apiFetch('/api/dashboard'),
+        apiFetch('/api/fuel'),
+        apiFetch('/api/maintenance'),
+        apiFetch('/api/planner')
       ]);
 
       if (!dashRes.ok || !fuelRes.ok || !maintRes.ok || !plannerRes.ok) {
@@ -93,22 +74,14 @@ function App() {
   }, [authToken]);
 
   const handleLoginSuccess = (token) => {
-    localStorage.setItem('onyx_auth_token', token);
+    setToken(token);
     setAuthToken(token);
   };
 
   const handleLogout = () => {
-    localStorage.removeItem('onyx_auth_token');
+    clearToken();
     setAuthToken(null);
-    setDashboardData({
-      currentOdometer: 0,
-      lastChainCleanOdometer: 0,
-      totalFuelCost: 0,
-      totalMaintenanceCost: 0,
-      fuelEntriesCount: 0,
-      maintenanceEntriesCount: 0,
-      averageMileage: 0
-    });
+    setDashboardData(EMPTY_DASHBOARD);
     setFuelLogs([]);
     setMaintenanceLogs([]);
     setPlannerData({ currentOdometer: 0, tasks: [] });
