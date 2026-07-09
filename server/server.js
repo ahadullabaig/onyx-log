@@ -6,6 +6,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { dbRun, dbGet, dbAll, dbReady } from './db.js';
+import { computeFuelEconomy } from './fuelEconomy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -24,8 +25,10 @@ if (!fs.existsSync(UPLOADS_DIR)) {
   fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
-// Serve uploaded bills statically
-app.use('/uploads', express.static(UPLOADS_DIR));
+// Serve uploaded bills statically, but only to authenticated clients. The token
+// arrives as a query param (?token=) because <img>/<iframe> cannot set headers.
+// requireAuthStatic / verifyToken are hoisted function declarations (defined below).
+app.use('/uploads', requireAuthStatic, express.static(UPLOADS_DIR));
 
 // Configure Multer for file uploads
 const storage = multer.diskStorage({
@@ -56,42 +59,59 @@ const upload = multer({
 // --- Auth Helpers & Middleware ---
 let sessionSecret;
 
-function requireAuth(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
+// Constant-time string comparison (hash both to a fixed length first so inputs
+// of differing length don't leak via timingSafeEqual's length requirement).
+function safeEqual(a, b) {
+  const ha = crypto.createHash('sha256').update(String(a)).digest();
+  const hb = crypto.createHash('sha256').update(String(b)).digest();
+  return crypto.timingSafeEqual(ha, hb);
+}
 
+// Verify a session token. Returns { ok: true } or { ok: false, status, error }.
+// Shared by the API middleware and the /uploads static guard.
+function verifyToken(token) {
   if (!token) {
-    return res.status(401).json({ error: 'Authentication token required' });
+    return { ok: false, status: 401, error: 'Authentication token required' };
   }
-
-  try {
-    const [expiryStr, signature] = token.split('.');
-    if (!expiryStr || !signature) {
-      return res.status(401).json({ error: 'Invalid token format' });
-    }
-
-    const expiry = parseInt(expiryStr, 10);
-    if (isNaN(expiry) || expiry < Date.now()) {
-      return res.status(401).json({ error: 'Session expired' });
-    }
-
-    if (!sessionSecret) {
-      return res.status(500).json({ error: 'Auth system uninitialized' });
-    }
-
-    const expectedSig = crypto
-      .createHmac('sha256', sessionSecret)
-      .update(expiryStr)
-      .digest('hex');
-
-    if (signature !== expectedSig) {
-      return res.status(401).json({ error: 'Invalid token signature' });
-    }
-
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: 'Invalid token' });
+  const [expiryStr, signature] = token.split('.');
+  if (!expiryStr || !signature) {
+    return { ok: false, status: 401, error: 'Invalid token format' };
   }
+  const expiry = parseInt(expiryStr, 10);
+  if (isNaN(expiry) || expiry < Date.now()) {
+    return { ok: false, status: 401, error: 'Session expired' };
+  }
+  if (!sessionSecret) {
+    return { ok: false, status: 500, error: 'Auth system uninitialized' };
+  }
+  const expectedSig = crypto
+    .createHmac('sha256', sessionSecret)
+    .update(expiryStr)
+    .digest('hex');
+  if (!safeEqual(signature, expectedSig)) {
+    return { ok: false, status: 401, error: 'Invalid token signature' };
+  }
+  return { ok: true };
+}
+
+function requireAuth(req, res, next) {
+  const token = req.headers['authorization']?.split(' ')[1];
+  const result = verifyToken(token);
+  if (!result.ok) {
+    return res.status(result.status).json({ error: result.error });
+  }
+  next();
+}
+
+// Static-asset guard: accepts the token from the Authorization header or a
+// ?token= query param (used by <img>/<iframe> loads of /uploads).
+function requireAuthStatic(req, res, next) {
+  const token = req.query.token || req.headers['authorization']?.split(' ')[1];
+  const result = verifyToken(token);
+  if (!result.ok) {
+    return res.status(result.status).send(result.error);
+  }
+  next();
 }
 
 app.post('/api/auth/login', (req, res) => {
@@ -102,7 +122,7 @@ app.post('/api/auth/login', (req, res) => {
     console.warn('WARNING: ACCESS_PASSWORD environment variable not set. Using default: onyx250');
   }
 
-  if (password === configuredPassword) {
+  if (safeEqual(password, configuredPassword)) {
     const expiry = Date.now() + 30 * 24 * 60 * 60 * 1000; // 30 days
     if (!sessionSecret) {
       return res.status(500).json({ error: 'Server auth secret not ready' });
@@ -137,11 +157,33 @@ app.delete('/api/upload/:filename', requireAuth, (req, res) => {
   res.json({ success: true });
 });
 
-// Sync odometer helper
+// Sync odometer helper — raises the recorded odometer to match a new log.
 async function syncOdometer(loggedOdo) {
   const status = await dbGet('SELECT current_odometer FROM bike_status WHERE id = 1');
   if (status && loggedOdo > status.current_odometer) {
     await dbRun('UPDATE bike_status SET current_odometer = ? WHERE id = 1', [loggedOdo]);
+  }
+}
+
+// After deleting a log, correct an inflated odometer (e.g. a mistyped entry that
+// had been synced up). Only lowers the odometer when the deleted entry was the
+// one at/above the current reading, so a legitimately higher manual reading is
+// preserved.
+async function recalcOdometerAfterDelete(deletedOdo) {
+  const status = await dbGet('SELECT current_odometer FROM bike_status WHERE id = 1');
+  if (!status || deletedOdo == null || deletedOdo < status.current_odometer) {
+    return;
+  }
+  const row = await dbGet(`
+    SELECT MAX(odo) AS max_odo FROM (
+      SELECT MAX(odometer) AS odo FROM fuel_logs
+      UNION ALL
+      SELECT MAX(odometer) AS odo FROM maintenance_logs
+    )
+  `);
+  const maxOdo = row?.max_odo || 0;
+  if (maxOdo < status.current_odometer) {
+    await dbRun('UPDATE bike_status SET current_odometer = ? WHERE id = 1', [maxOdo]);
   }
 }
 
@@ -154,40 +196,13 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     const fuelStats = await dbGet('SELECT SUM(total_cost) as total_fuel, COUNT(*) as count FROM fuel_logs');
     const maintStats = await dbGet('SELECT SUM(cost) as total_maint, COUNT(*) as count FROM maintenance_logs');
 
-    // Average fuel economy (km/L) using the full-to-full method — consistent with
-    // the per-entry calculation in the Fuel Log UI. Only distance/liters between
-    // consecutive FULL fill-ups count; liters from partial fills in between are
-    // carried into the next full-to-full segment.
-    const fuelLogs = await dbAll('SELECT odometer, liters, full_tank FROM fuel_logs ORDER BY odometer ASC');
-    let avgMileage = 0;
-    let segDistance = 0;
-    let segLiters = 0;
-    let lastFullIdx = -1;
-
-    for (let i = 0; i < fuelLogs.length; i++) {
-      if (fuelLogs[i].full_tank === 1) {
-        if (lastFullIdx !== -1) {
-          const distance = fuelLogs[i].odometer - fuelLogs[lastFullIdx].odometer;
-          let liters = 0;
-          for (let k = lastFullIdx + 1; k <= i; k++) {
-            liters += fuelLogs[k].liters;
-          }
-          if (distance > 0 && liters > 0) {
-            segDistance += distance;
-            segLiters += liters;
-          }
-        }
-        lastFullIdx = i;
-      }
-    }
-
-    if (segLiters > 0) {
-      avgMileage = segDistance / segLiters;
-    }
+    // Average fuel economy (km/L) via the shared full-to-full helper, so the
+    // dashboard average and the per-entry Fuel Log values never drift.
+    const fuelLogs = await dbAll('SELECT id, odometer, liters, full_tank FROM fuel_logs');
+    const { average: avgMileage } = computeFuelEconomy(fuelLogs);
 
     res.json({
       currentOdometer: status?.current_odometer || 0,
-      lastChainCleanOdometer: status?.last_chain_clean_odometer || 0,
       totalFuelCost: fuelStats?.total_fuel || 0,
       totalMaintenanceCost: maintStats?.total_maint || 0,
       fuelEntriesCount: fuelStats?.count || 0,
@@ -199,15 +214,12 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
   }
 });
 
-// Update odometer manually or clean chain
+// Update odometer manually
 app.post('/api/odometer', requireAuth, async (req, res) => {
-  const { currentOdometer, lastChainCleanOdometer } = req.body;
+  const { currentOdometer } = req.body;
   try {
     if (currentOdometer !== undefined) {
       await dbRun('UPDATE bike_status SET current_odometer = ? WHERE id = 1', [currentOdometer]);
-    }
-    if (lastChainCleanOdometer !== undefined) {
-      await dbRun('UPDATE bike_status SET last_chain_clean_odometer = ? WHERE id = 1', [lastChainCleanOdometer]);
     }
     res.json({ success: true });
   } catch (error) {
@@ -219,7 +231,11 @@ app.post('/api/odometer', requireAuth, async (req, res) => {
 app.get('/api/fuel', requireAuth, async (req, res) => {
   try {
     const logs = await dbAll('SELECT * FROM fuel_logs ORDER BY odometer DESC, date DESC');
-    res.json(logs);
+    // Attach per-entry full-to-full mileage here (single source of truth) so the
+    // client renders server-computed values instead of recomputing its own.
+    const { mileageById } = computeFuelEconomy(logs);
+    const withMileage = logs.map(log => ({ ...log, mileage: mileageById.get(log.id) ?? null }));
+    res.json(withMileage);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -251,7 +267,9 @@ app.post('/api/fuel', requireAuth, async (req, res) => {
 
 app.delete('/api/fuel/:id', requireAuth, async (req, res) => {
   try {
+    const log = await dbGet('SELECT odometer FROM fuel_logs WHERE id = ?', [req.params.id]);
     await dbRun('DELETE FROM fuel_logs WHERE id = ?', [req.params.id]);
+    await recalcOdometerAfterDelete(log?.odometer);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -289,14 +307,6 @@ app.post('/api/maintenance', requireAuth, async (req, res) => {
     // Sync primary odometer
     await syncOdometer(odometer);
 
-    // Specific logic for Chain Maintenance: automatically update last chain clean odometer
-    if (category === 'Chain Maintenance') {
-      const status = await dbGet('SELECT last_chain_clean_odometer FROM bike_status WHERE id = 1');
-      if (!status || odometer > status.last_chain_clean_odometer) {
-        await dbRun('UPDATE bike_status SET last_chain_clean_odometer = ? WHERE id = 1', [odometer]);
-      }
-    }
-
     res.json({ id: result.id, success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -308,15 +318,16 @@ app.delete('/api/maintenance/:id', requireAuth, async (req, res) => {
     // Delete linked receipt if present. Resolve strictly inside UPLOADS_DIR via
     // basename() so a crafted bill_path (e.g. "/uploads/../../etc/x") can never
     // point fs.unlinkSync outside the uploads folder.
-    const log = await dbGet('SELECT bill_path FROM maintenance_logs WHERE id = ?', [req.params.id]);
+    const log = await dbGet('SELECT bill_path, odometer FROM maintenance_logs WHERE id = ?', [req.params.id]);
     if (log && log.bill_path) {
       const fullPath = path.join(UPLOADS_DIR, path.basename(log.bill_path));
       if (fullPath.startsWith(UPLOADS_DIR) && fs.existsSync(fullPath)) {
         fs.unlinkSync(fullPath);
       }
     }
-    
+
     await dbRun('DELETE FROM maintenance_logs WHERE id = ?', [req.params.id]);
+    await recalcOdometerAfterDelete(log?.odometer);
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -331,15 +342,32 @@ app.get('/api/planner', requireAuth, async (req, res) => {
     const currentOdo = status?.current_odometer || 0;
     const tasks = await dbAll('SELECT * FROM maintenance_planner');
     
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    // Work in whole calendar days in UTC to avoid timezone off-by-one errors:
+    // stored dates are plain YYYY-MM-DD, so treat them (and "today") as UTC midnights.
+    const DAY_MS = 1000 * 60 * 60 * 24;
+    const now = new Date();
+    const todayUTC = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+
+    const parseDateUTC = (str) => {
+      const [y, m, d] = str.split('-').map(Number);
+      return Date.UTC(y, m - 1, d);
+    };
+    const addMonthsUTC = (utcMs, months) => {
+      const d = new Date(utcMs);
+      d.setUTCMonth(d.getUTCMonth() + months);
+      return d.getTime();
+    };
 
     const calculatedTasks = tasks.map(task => {
       let dueInKm = null;
       let dueInDays = null;
       let nextDueOdo = null;
       let nextDueDate = null;
-      let isConfigured = task.last_done_date !== null && task.last_done_odometer !== null;
+
+      // A km-based task needs an odometer baseline; a time-only task needs only a date.
+      const needsOdo = task.interval_km !== null;
+      const isConfigured = task.last_done_date != null && (!needsOdo || task.last_done_odometer != null);
+      const lastDoneUTC = task.last_done_date != null ? parseDateUTC(task.last_done_date) : null;
 
       if (isConfigured) {
         if (task.interval_km !== null) {
@@ -347,12 +375,9 @@ app.get('/api/planner', requireAuth, async (req, res) => {
           dueInKm = nextDueOdo - currentOdo;
         }
         if (task.interval_months !== null) {
-          const d = new Date(task.last_done_date);
-          d.setMonth(d.getMonth() + task.interval_months);
-          d.setHours(0, 0, 0, 0);
-          nextDueDate = d.toISOString().split('T')[0];
-          const diffTime = d.getTime() - today.getTime();
-          dueInDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          const nextDueUTC = addMonthsUTC(lastDoneUTC, task.interval_months);
+          nextDueDate = new Date(nextDueUTC).toISOString().split('T')[0];
+          dueInDays = Math.round((nextDueUTC - todayUTC) / DAY_MS);
         }
       }
 
@@ -361,18 +386,15 @@ app.get('/api/planner', requireAuth, async (req, res) => {
         let pctKm = 0;
         if (task.interval_km !== null) {
           const runDistance = currentOdo - task.last_done_odometer;
-          pctKm = (runDistance / task.interval_km) * 100;
-          pctKm = Math.max(0, Math.min(100, pctKm));
+          pctKm = Math.max(0, Math.min(100, (runDistance / task.interval_km) * 100));
         }
 
         let pctDays = 0;
-        if (task.interval_months !== null) {
-          const dStart = new Date(task.last_done_date);
-          const dEnd = new Date(nextDueDate);
-          const totalDays = Math.ceil((dEnd.getTime() - dStart.getTime()) / (1000 * 60 * 60 * 24));
-          const elapsedDays = totalDays - dueInDays;
-          pctDays = totalDays > 0 ? (elapsedDays / totalDays) * 100 : 0;
-          pctDays = Math.max(0, Math.min(100, pctDays));
+        if (task.interval_months !== null && lastDoneUTC !== null) {
+          const nextDueUTC = addMonthsUTC(lastDoneUTC, task.interval_months);
+          const totalDays = Math.round((nextDueUTC - lastDoneUTC) / DAY_MS);
+          const elapsedDays = Math.round((todayUTC - lastDoneUTC) / DAY_MS);
+          pctDays = totalDays > 0 ? Math.max(0, Math.min(100, (elapsedDays / totalDays) * 100)) : 0;
         }
 
         consumedPercent = Math.round(Math.max(pctKm, pctDays));
@@ -493,13 +515,24 @@ app.post('/api/planner/:id/complete', requireAuth, async (req, res) => {
 
 app.delete('/api/planner/:id', requireAuth, async (req, res) => {
   try {
-    await dbRun('DELETE FROM maintenance_planner WHERE id = ?', [req.params.id]);
+    // Only user-defined tasks are deletable; factory defaults are protected
+    // (mirrors the UI, which hides delete for them).
+    const result = await dbRun('DELETE FROM maintenance_planner WHERE id = ? AND is_custom = 1', [req.params.id]);
+    if (result.changes === 0) {
+      return res.status(404).json({ error: 'Task not found or is a protected factory default' });
+    }
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
+
+// Unmatched API routes return JSON 404 (not the SPA's index.html), so clients
+// always get a parseable error for a bad endpoint.
+app.use('/api', (req, res) => {
+  res.status(404).json({ error: 'API endpoint not found' });
+});
 
 // Serve frontend build in production
 const frontendBuildPath = path.join(__dirname, '..', 'client', 'dist');

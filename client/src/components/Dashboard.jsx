@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { RefreshCw, Fuel, Wrench, AlertTriangle } from 'lucide-react';
+import { apiFetch } from '../api';
 
 function Dashboard({ data, refresh, fuelLogs = [], maintLogs = [], plannerData, setActiveTab }) {
   const [newOdo, setNewOdo] = useState('');
@@ -42,8 +43,10 @@ function Dashboard({ data, refresh, fuelLogs = [], maintLogs = [], plannerData, 
   const fmtK = (n) => (n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(Math.round(n)));
   const inr = (n) => Number(n || 0).toLocaleString('en-IN', { maximumFractionDigits: 0 });
 
-  // Get top 3 urgent tasks from planner data
-  const urgentTasks = (plannerData?.tasks || []).slice(0, 3);
+  // Only genuinely urgent tasks (Overdue / Due Soon) surface as priority alerts.
+  const urgentTasks = (plannerData?.tasks || [])
+    .filter(t => t.status === 'Overdue' || t.status === 'Due Soon')
+    .slice(0, 3);
 
   const handleUpdateOdometer = async (e) => {
     e.preventDefault();
@@ -54,7 +57,7 @@ function Dashboard({ data, refresh, fuelLogs = [], maintLogs = [], plannerData, 
 
     try {
       setUpdatingOdo(true);
-      const res = await fetch('/api/odometer', {
+      const res = await apiFetch('/api/odometer', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ currentOdometer: parseInt(newOdo) })
@@ -173,13 +176,10 @@ function Dashboard({ data, refresh, fuelLogs = [], maintLogs = [], plannerData, 
                   alertColor = 'var(--caution-amber)';
                   alertBg = 'var(--caution-amber-bg)';
                   alertBorder = '1px solid rgba(255, 176, 32, 0.2)';
-                  if (task.dueInKm !== null && task.dueInKm <= 500) {
-                    dueText = `Due in ${task.dueInKm.toLocaleString()} km`;
-                  } else if (task.dueInDays !== null) {
-                    dueText = `Due in ${task.dueInDays} days`;
-                  } else {
-                    dueText = 'Due Soon';
-                  }
+                  const parts = [];
+                  if (task.dueInKm !== null) parts.push(`${task.dueInKm.toLocaleString()} km`);
+                  if (task.dueInDays !== null) parts.push(`${task.dueInDays} days`);
+                  dueText = parts.length ? `Due in ${parts.join(' / ')}` : 'Due Soon';
                 } else if (isUnconfigured) {
                   alertColor = 'var(--caution-amber)';
                   alertBg = 'rgba(255, 176, 32, 0.05)';

@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { Plus, Trash2, TrendingUp } from 'lucide-react';
+import { apiFetch } from '../api';
 
 function FuelLog({ logs, refresh, currentOdo }) {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -33,46 +34,10 @@ function FuelLog({ logs, refresh, currentOdo }) {
     }
   };
 
-  // Calculate full-to-full fuel efficiency for all logs
-  // Returns logs with a `mileage` field (km/L)
-  const logsWithMileage = useMemo(() => {
-    if (logs.length === 0) return [];
-    
-    // Sort chronologically (ascending odometer) for math
-    const sorted = [...logs].sort((a, b) => a.odometer - b.odometer);
-    
-    const result = sorted.map(log => ({ ...log, mileage: null }));
-    
-    for (let i = 0; i < result.length; i++) {
-      if (result[i].full_tank === 1) {
-        // Find previous full fill-up
-        let prevFullIdx = -1;
-        for (let j = i - 1; j >= 0; j--) {
-          if (result[j].full_tank === 1) {
-            prevFullIdx = j;
-            break;
-          }
-        }
-        
-        if (prevFullIdx !== -1) {
-          const distance = result[i].odometer - result[prevFullIdx].odometer;
-          
-          // Sum up liters filled since the last full fill (excluding last full fill, including current fill)
-          let totalLiters = 0;
-          for (let k = prevFullIdx + 1; k <= i; k++) {
-            totalLiters += result[k].liters;
-          }
-          
-          if (totalLiters > 0 && distance > 0) {
-            result[i].mileage = distance / totalLiters;
-          }
-        }
-      }
-    }
-    
-    // Reverse back to descending order (newest first) for presentation
-    return result.reverse();
-  }, [logs]);
+  // Per-entry full-to-full mileage (km/L) is computed server-side and returned
+  // on each log (descending order), so the table and chart share one source of
+  // truth with the dashboard average.
+  const logsWithMileage = logs;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -88,7 +53,7 @@ function FuelLog({ logs, refresh, currentOdo }) {
 
     try {
       setSubmitting(true);
-      const res = await fetch('/api/fuel', {
+      const res = await apiFetch('/api/fuel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -123,7 +88,7 @@ function FuelLog({ logs, refresh, currentOdo }) {
   const handleDelete = async (id) => {
     if (confirm('Are you sure you want to delete this fuel entry?')) {
       try {
-        const res = await fetch(`/api/fuel/${id}`, {
+        const res = await apiFetch(`/api/fuel/${id}`, {
           method: 'DELETE'
         });
         if (!res.ok) throw new Error('Failed to delete fuel log');

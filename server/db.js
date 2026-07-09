@@ -77,7 +77,6 @@ async function initializeDatabase() {
       CREATE TABLE IF NOT EXISTS bike_status (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         current_odometer INTEGER DEFAULT 0,
-        last_chain_clean_odometer INTEGER DEFAULT 0,
         session_secret TEXT
       )
     `);
@@ -134,7 +133,6 @@ async function initializeDatabase() {
         ['Chain Clean & Lube', 500, 1],
         ['Engine Oil & Oil Filter', 7500, 12],
         ['Brake Pad Inspection', 5000, 6],
-        ['Tyre Inspection', 1000, 1],
         ['Brake Disc Inspection', 10000, 12],
         ['Battery Inspection', 10000, 12],
         ['Spark Plug Inspection', 15000, 24],
@@ -153,11 +151,19 @@ async function initializeDatabase() {
       console.log('Pre-populated maintenance_planner with factory default tasks.');
     }
 
+    // Retire the factory "Tyre Inspection" task from databases that were seeded
+    // with it. Idempotent, and scoped to is_custom = 0 so a user who later
+    // re-adds it as a custom task keeps their copy.
+    const tyreCleanup = await dbRun("DELETE FROM maintenance_planner WHERE task_name = 'Tyre Inspection' AND is_custom = 0");
+    if (tyreCleanup.changes > 0) {
+      console.log('Removed retired factory task: Tyre Inspection.');
+    }
+
     // Pre-populate single bike_status row if not present
     let status = await dbGet('SELECT * FROM bike_status WHERE id = 1');
     if (!status) {
       const secret = crypto.randomBytes(32).toString('hex');
-      await dbRun('INSERT INTO bike_status (id, current_odometer, last_chain_clean_odometer, session_secret) VALUES (1, 0, 0, ?)', [secret]);
+      await dbRun('INSERT INTO bike_status (id, current_odometer, session_secret) VALUES (1, 0, ?)', [secret]);
       console.log('Database initialized with default bike status and session secret.');
     } else {
       if (!status.session_secret) {

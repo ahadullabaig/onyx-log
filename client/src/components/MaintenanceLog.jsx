@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Plus, Trash2, Upload, CheckCircle, X, Eye } from 'lucide-react';
+import { apiFetch, uploadUrl } from '../api';
 
 function MaintenanceLog({ logs, refresh, currentOdo }) {
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
@@ -75,7 +76,7 @@ function MaintenanceLog({ logs, refresh, currentOdo }) {
     const onClose = () => {
       if (!billPathRef.current) return;
       const fileName = billPathRef.current.split('/').pop();
-      fetch(`/api/upload/${fileName}`, { method: 'DELETE' }).catch(() => {});
+      apiFetch(`/api/upload/${fileName}`, { method: 'DELETE' }).catch(() => {});
       billPathRef.current = null;
       setBillPath(null);
     };
@@ -121,7 +122,7 @@ function MaintenanceLog({ logs, refresh, currentOdo }) {
 
     try {
       setUploading(true);
-      const res = await fetch('/api/upload', {
+      const res = await apiFetch('/api/upload', {
         method: 'POST',
         body: formData
       });
@@ -143,7 +144,7 @@ function MaintenanceLog({ logs, refresh, currentOdo }) {
     setBillPath(null);
     if (!path) return;
     try {
-      await fetch(`/api/upload/${path.split('/').pop()}`, { method: 'DELETE' });
+      await apiFetch(`/api/upload/${path.split('/').pop()}`, { method: 'DELETE' });
     } catch {
       // best-effort cleanup; ignore failures
     }
@@ -158,7 +159,7 @@ function MaintenanceLog({ logs, refresh, currentOdo }) {
 
     try {
       setSubmitting(true);
-      const res = await fetch('/api/maintenance', {
+      const res = await apiFetch('/api/maintenance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -200,7 +201,7 @@ function MaintenanceLog({ logs, refresh, currentOdo }) {
   const handleDelete = async (id) => {
     if (confirm('Delete this maintenance log and its receipt permanently?')) {
       try {
-        const res = await fetch(`/api/maintenance/${id}`, {
+        const res = await apiFetch(`/api/maintenance/${id}`, {
           method: 'DELETE'
         });
         if (!res.ok) throw new Error('Failed to delete maintenance log');
@@ -453,9 +454,9 @@ function MaintenanceLog({ logs, refresh, currentOdo }) {
         <div className="receipt-body">
           {previewFile ? (
             previewFile.toLowerCase().endsWith('.pdf') ? (
-              <iframe className="receipt-pdf" src={previewFile} title="Receipt PDF"></iframe>
+              <iframe className="receipt-pdf" src={uploadUrl(previewFile)} title="Receipt PDF"></iframe>
             ) : (
-              <img className="receipt-img" src={previewFile} alt="Receipt Bill" />
+              <img className="receipt-img" src={uploadUrl(previewFile)} alt="Receipt Bill" />
             )
           ) : (
             <div style={{ color: 'var(--text-secondary)' }}>No preview available</div>
