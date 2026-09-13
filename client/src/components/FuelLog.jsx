@@ -131,7 +131,7 @@ function FuelLog({ logs, refresh, currentOdo }) {
   const renderMileageChart = () => {
     if (!chartData || chartData.points.length < 2) {
       return (
-        <div className="chart-empty">NEED AT LEAST 2 FULL FILL-UPS TO RENDER CHART</div>
+        <div className="chart-empty">NEED AT LEAST 2 FILL-UPS WITH MILEAGE TO RENDER CHART</div>
       );
     }
 
@@ -251,7 +251,7 @@ function FuelLog({ logs, refresh, currentOdo }) {
             {hover && (
               <g pointerEvents="none">
                 <rect x={bx} y={by} width={boxW} height={boxH} rx="5" className="chart-tt-box" />
-                <text x={bx + 13} y={by + 22} className="chart-tt-main">{hover.data.mileage.toFixed(2)} km/L</text>
+                <text x={bx + 13} y={by + 22} className="chart-tt-main">{hover.data.mileage.toFixed(2)} km/L{hover.data.isEstimated ? ' (Est.)' : ''}</text>
                 <text x={bx + 13} y={by + 38} className="chart-tt-sub">{hover.data.odometer.toLocaleString()} km</text>
                 <text x={bx + 13} y={by + 50} className="chart-tt-sub">{hover.data.date}</text>
               </g>
@@ -410,7 +410,24 @@ function FuelLog({ logs, refresh, currentOdo }) {
                         </span>
                       </td>
                       <td style={{ fontFamily: 'var(--mono)', fontWeight: 'bold', color: log.mileage ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                        {log.mileage ? `${log.mileage.toFixed(2)} km/l` : (log.full_tank === 1 ? 'Calculating...' : 'N/A')}
+                        {log.mileage ? (
+                          <>
+                            {log.mileage.toFixed(2)} km/l
+                            {log.isEstimated && (
+                              <span style={{ fontSize: '0.7rem', color: 'var(--caution-amber)', marginLeft: '0.4rem', fontWeight: '500' }}>
+                                (Est.)
+                              </span>
+                            )}
+                          </>
+                        ) : (
+                          log.carriedLiters ? (
+                            <span style={{ fontSize: '0.8rem', color: 'var(--coolant-ice)', fontWeight: 'normal' }}>
+                              +{log.carriedLiters.toFixed(1)} L carried
+                            </span>
+                          ) : (
+                            log.full_tank === 1 ? 'Calculating...' : 'N/A'
+                          )
+                        )}
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         <button 

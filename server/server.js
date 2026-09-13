@@ -196,10 +196,10 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
     const fuelStats = await dbGet('SELECT SUM(total_cost) as total_fuel, COUNT(*) as count FROM fuel_logs');
     const maintStats = await dbGet('SELECT SUM(cost) as total_maint, COUNT(*) as count FROM maintenance_logs');
 
-    // Average fuel economy (km/L) via the shared full-to-full helper, so the
-    // dashboard average and the per-entry Fuel Log values never drift.
+    // Average fuel economy (km/L) via the shared helper, supporting exact
+    // full-to-full segments or span distance fallback when only partials exist.
     const fuelLogs = await dbAll('SELECT id, odometer, liters, full_tank FROM fuel_logs');
-    const { average: avgMileage } = computeFuelEconomy(fuelLogs);
+    const { average: avgMileage, isEstimated: isEstimatedMileage } = computeFuelEconomy(fuelLogs);
 
     res.json({
       currentOdometer: status?.current_odometer || 0,
@@ -207,7 +207,8 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
       totalMaintenanceCost: maintStats?.total_maint || 0,
       fuelEntriesCount: fuelStats?.count || 0,
       maintenanceEntriesCount: maintStats?.count || 0,
-      averageMileage: avgMileage
+      averageMileage: avgMileage,
+      isEstimatedMileage: isEstimatedMileage || false
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -231,10 +232,17 @@ app.post('/api/odometer', requireAuth, async (req, res) => {
 app.get('/api/fuel', requireAuth, async (req, res) => {
   try {
     const logs = await dbAll('SELECT * FROM fuel_logs ORDER BY odometer DESC, date DESC');
-    // Attach per-entry full-to-full mileage here (single source of truth) so the
-    // client renders server-computed values instead of recomputing its own.
-    const { mileageById } = computeFuelEconomy(logs);
-    const withMileage = logs.map(log => ({ ...log, mileage: mileageById.get(log.id) ?? null }));
+    // Attach per-entry mileage and partial accumulation metadata (single source of truth)
+    const { mileageById, metaById } = computeFuelEconomy(logs);
+    const withMileage = logs.map(log => {
+      const meta = metaById?.get(log.id) || {};
+      return {
+        ...log,
+        mileage: mileageById.get(log.id) ?? null,
+        isEstimated: meta.isEstimated ?? false,
+        carriedLiters: meta.carriedLiters ?? null
+      };
+    });
     res.json(withMileage);
   } catch (error) {
     res.status(500).json({ error: error.message });

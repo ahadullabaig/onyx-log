@@ -14,7 +14,8 @@ const EMPTY_DASHBOARD = {
   totalMaintenanceCost: 0,
   fuelEntriesCount: 0,
   maintenanceEntriesCount: 0,
-  averageMileage: 0
+  averageMileage: 0,
+  isEstimatedMileage: false
 };
 
 function App() {

@@ -108,7 +108,7 @@ function Dashboard({ data, refresh, fuelLogs = [], maintLogs = [], plannerData, 
             {averageMileage > 0 && <span className="stat-unit">km/l</span>}
           </div>
           <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-            Across {fuelEntriesCount} refuels
+            Across {fuelEntriesCount} refuels{data.isEstimatedMileage ? ' (Est.)' : ''}
           </span>
         </div>
 
