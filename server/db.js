@@ -70,6 +70,42 @@ export const dbAll = (sql, params = []) => {
   });
 };
 
+// Factory planner tasks: [name, interval_km, interval_months]. Intervals follow
+// the KTM 250 Duke (2024+) owner's manual service schedule; chain lube, brake
+// pads, discs, battery, fork oil and chain kit are common-practice intervals.
+const FACTORY_TASKS = [
+  ['Chain Clean & Lube', 500, 1],
+  ['Engine Oil & Oil Filter', 7500, 12],
+  ['Brake Pad Inspection', 5000, 6],
+  ['Brake Disc Inspection', 10000, 12],
+  ['Battery Inspection', 10000, 12],
+  ['Air Filter Replacement', 7500, null],
+  ['Spark Plug Replacement', 15000, null],
+  ['Valve Clearance Check', 15000, null],
+  ['Bearing Play Check (Steering, Swingarm, Wheels)', 7500, null],
+  ['Fork Dust Boot Cleaning', 7500, null],
+  ['Brake Fluid Replacement', null, 24],
+  ['Coolant Replacement', null, 48],
+  ['Fork Oil Replacement', 30000, 36],
+  ['Drive Chain & Sprocket Replacement', 25000, null]
+];
+
+// Earlier factory defaults corrected in place. A row is only upgraded while it
+// still has the old name and intervals, so user-edited tasks are left alone;
+// completion baselines are always kept.
+const FACTORY_TASK_UPGRADES = [
+  { from: ['Coolant Replacement', null, 24], to: ['Coolant Replacement', null, 48] },
+  { from: ['Air Filter Inspection', 7500, 12], to: ['Air Filter Replacement', 7500, null] },
+  { from: ['Spark Plug Inspection', 15000, 24], to: ['Spark Plug Replacement', 15000, null] }
+];
+
+// Factory tasks introduced after the first release, added to existing databases.
+const ADDED_FACTORY_TASKS = [
+  'Valve Clearance Check',
+  'Bearing Play Check (Steering, Swingarm, Wheels)',
+  'Fork Dust Boot Cleaning'
+];
+
 async function initializeDatabase() {
   try {
     // Create tables
@@ -129,26 +165,38 @@ async function initializeDatabase() {
     // Pre-populate factory default tasks if table is empty
     const plannerCount = await dbGet('SELECT COUNT(*) as count FROM maintenance_planner');
     if (plannerCount && plannerCount.count === 0) {
-      const defaultTasks = [
-        ['Chain Clean & Lube', 500, 1],
-        ['Engine Oil & Oil Filter', 7500, 12],
-        ['Brake Pad Inspection', 5000, 6],
-        ['Brake Disc Inspection', 10000, 12],
-        ['Battery Inspection', 10000, 12],
-        ['Spark Plug Inspection', 15000, 24],
-        ['Air Filter Inspection', 7500, 12],
-        ['Brake Fluid Replacement', null, 24],
-        ['Coolant Replacement', null, 24],
-        ['Fork Oil Replacement', 30000, 36],
-        ['Drive Chain & Sprocket Replacement', 25000, null]
-      ];
-      for (const [name, km, months] of defaultTasks) {
+      for (const [name, km, months] of FACTORY_TASKS) {
         await dbRun(
           'INSERT INTO maintenance_planner (task_name, interval_km, interval_months, last_done_date, last_done_odometer, is_custom) VALUES (?, ?, ?, NULL, NULL, 0)',
           [name, km, months]
         );
       }
       console.log('Pre-populated maintenance_planner with factory default tasks.');
+    }
+
+    // Bring factory tasks in existing databases in line with the KTM schedule.
+    // Idempotent: upgrades match only the old values, inserts skip existing names.
+    for (const { from, to } of FACTORY_TASK_UPGRADES) {
+      const upgrade = await dbRun(
+        `UPDATE maintenance_planner SET task_name = ?, interval_km = ?, interval_months = ?
+         WHERE is_custom = 0 AND task_name = ? AND interval_km IS ? AND interval_months IS ?`,
+        [...to, ...from]
+      );
+      if (upgrade.changes > 0) {
+        console.log(`Updated factory task to the KTM schedule: ${to[0]}.`);
+      }
+    }
+    for (const name of ADDED_FACTORY_TASKS) {
+      const [, km, months] = FACTORY_TASKS.find(([taskName]) => taskName === name);
+      const added = await dbRun(
+        `INSERT INTO maintenance_planner (task_name, interval_km, interval_months, last_done_date, last_done_odometer, is_custom)
+         SELECT ?, ?, ?, NULL, NULL, 0
+         WHERE NOT EXISTS (SELECT 1 FROM maintenance_planner WHERE task_name = ?)`,
+        [name, km, months, name]
+      );
+      if (added.changes > 0) {
+        console.log(`Added factory task: ${name}.`);
+      }
     }
 
     // Retire the factory "Tyre Inspection" task from databases that were seeded

@@ -31,11 +31,11 @@ The application is built with the custom **"Trellis" Design System** (an obsidia
 ### 4. Maintenance Planner & Checklist
 *   **Categorized Checklists**: Dynamically groups tasks into logical folders: **CHAIN CARE** (⛓), **ENGINE & COOLING** (🛢), **BRAKES** (🛑), **TYRES** (🛞), **SUSPENSION** (🔧), and **ELECTRICAL** (🔋) to match typical service workflows.
 *   **Dual-Interval Consumption Indicators**: Supports mileage intervals, time-based intervals (months), or both. Renders premium horizontal progress bars showing the exact percentage consumed.
-*   **Preconfigured Factory Defaults**: Pre-populated with 11 KTM Duke 250 factory manual settings (e.g. Chain Clean & Lube at 500 km/1 month, Engine Oil at 7,500 km/12 months, Brake Pad Inspection at 5,000 km/6 months, time-only replacements like Coolant/Brake Fluid at 24 months, etc.).
+*   **Preconfigured Factory Defaults**: Pre-populated with 14 tasks following the KTM Duke 250 (2024+) owner's manual schedule (e.g. Engine Oil at 7,500 km/12 months, Air Filter Replacement and Bearing Play Check at 7,500 km, Spark Plug Replacement and Valve Clearance Check at 15,000 km, Brake Fluid at 24 months, Coolant at 48 months), plus common-practice items like Chain Clean & Lube at 500 km/1 month and Brake Pad Inspection at 5,000 km/6 months. Existing databases are migrated to these defaults on startup without touching user-edited tasks.
 *   **Interactive Baselines & Custom Tasks**: Setup/edit completion milestones using dialog forms, mark tasks completed, or add/delete custom user-defined maintenance tasks.
 
 ### 5. Technical Specs & Tightening Torques
-*   **Technical Cheat Sheet**: Fluid capacity references (e.g., 1.7L 10W-50 JASO MA2 engine oil, Motorex M3.0 OAT coolant), tyre dimensions, and factory slack tolerances.
+*   **Technical Cheat Sheet**: Fluid capacity references (e.g., 1.2L 15W-50 JASO MA2 engine oil, Motorex M3.0 OAT coolant), tyre dimensions, and factory chain tension.
 *   **Torque Reference Card**: Mapped torque values in Newton-meters (Nm) for common garage tasks (rear axle nut, oil drain plugs, caliper bolts, spark plugs) to ensure safe DIY servicing without damaging soft aluminum threads.
 
 ---

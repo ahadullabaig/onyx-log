@@ -11,13 +11,13 @@ function MaintenancePlanner({ data, refresh, currentOdo }) {
     if (n.includes('chain') || n.includes('sprocket')) {
       return { name: 'CHAIN', icon: '⛓', label: '⛓ Chain Care' };
     }
-    if (n.includes('fork') || n.includes('seal') || n.includes('shock') || n.includes('suspension')) {
+    if (n.includes('fork') || n.includes('seal') || n.includes('shock') || n.includes('suspension') || n.includes('bearing')) {
       return { name: 'SUSPENSION', icon: '🔧', label: '🔧 Suspension' };
     }
     if (n.includes('brake') || n.includes('pad') || n.includes('disc')) {
       return { name: 'BRAKES', icon: '🛑', label: '🛑 Brakes' };
     }
-    if (n.includes('oil') || n.includes('filter') || n.includes('spark') || n.includes('plug') || n.includes('coolant') || n.includes('engine')) {
+    if (n.includes('oil') || n.includes('filter') || n.includes('spark') || n.includes('plug') || n.includes('coolant') || n.includes('engine') || n.includes('valve')) {
       return { name: 'ENGINE', icon: '🛢', label: '🛢 Engine & Cooling' };
     }
     if (n.includes('tyre') || n.includes('tire') || n.includes('tread') || n.includes('pressure') || n.includes('wear')) {
