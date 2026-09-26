@@ -1,4 +1,14 @@
-import { dbRun, dbGet, dbAll, dbReady } from './db.js';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+
+// Run against a throwaway database, never the real server/database.db.
+// db.js reads DATA_DIR when it is imported, so set it before the dynamic import.
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'onyx-test-'));
+process.env.DATA_DIR = tmpDir;
+process.on('exit', () => fs.rmSync(tmpDir, { recursive: true, force: true }));
+
+const { dbRun, dbGet, dbAll, dbReady } = await import('./db.js');
 
 async function runTests() {
   console.log('--- Database Integration Tests ---');

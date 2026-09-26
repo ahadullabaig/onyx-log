@@ -14,31 +14,31 @@ function SpecsSheet() {
       { name: 'Compression Ratio', val: '12.5:1' }
     ]},
     { category: 'Fluids & Capacities', specs: [
-      { name: 'Engine Oil Capacity', val: '1.7 Liters (with oil filter replacement)' },
-      { name: 'Engine Oil Viscosity', val: 'SAE 10W-50 (Fully Synthetic, JASO MA2)' },
+      { name: 'Engine Oil Capacity', val: '1.2 Liters (with oil filter replacement)' },
+      { name: 'Engine Oil Viscosity', val: 'SAE 15W-50 (Semi-Synthetic, JASO MA2)' },
       { name: 'Coolant Type', val: 'Motorex Coolant M3.0 (Organic Acid Technology / OAT)' },
       { name: 'Fuel Tank Capacity', val: '15 Liters (approx. 2.0L reserve)' },
-      { name: 'Brake Fluid Spec', val: 'DOT 4' }
+      { name: 'Brake Fluid Spec', val: 'DOT 4 / DOT 5.1' }
     ]},
     { category: 'Chassis & Tyres', specs: [
       { name: 'Front Tyre Size', val: '110/70 R17 (Radial)' },
       { name: 'Rear Tyre Size', val: '150/60 R17 (Radial)' },
-      { name: 'Front Tyre Pressure', val: '29 PSI' },
-      { name: 'Rear Tyre Pressure', val: '32 PSI (Standard) / 34 PSI (with passenger)' },
-      { name: 'Chain Slack / Play', val: '33 mm - 40 mm' },
+      { name: 'Front Tyre Pressure', val: '29 PSI / 2.0 bar (solo and with passenger)' },
+      { name: 'Rear Tyre Pressure', val: '32 PSI / 2.2 bar (solo and with passenger)' },
+      { name: 'Chain Tension', val: '5 mm - 7 mm (chain pushed up toward the swingarm, behind the chain slider)' },
       { name: 'Transmission', val: '6-speed with Quickshifter+ & slipper clutch' }
     ]}
   ];
 
   const torqueSpecs = [
-    { part: 'Engine oil drain plug (M12)', val: '15 Nm (11.1 lb-ft)' },
-    { part: 'Engine oil screen plug (M20)', val: '15 Nm (11.1 lb-ft)' },
-    { part: 'Oil filter cover screws (M6)', val: '10 Nm (7.4 lb-ft)' },
-    { part: 'Rear axle nut (M22)', val: '90 Nm (66.4 lb-ft)' },
-    { part: 'Front axle bolt (M8)', val: '45 Nm (33.2 lb-ft)' },
+    { part: 'Engine oil drain plug (M24x1.5)', val: '12.5 Nm (9.2 lb-ft)' },
+    { part: 'Small oil screen plug (M17x1.5)', val: '11 Nm (8.1 lb-ft)' },
+    { part: 'Oil filter cover screws (M6)', val: '9 Nm (6.6 lb-ft)' },
+    { part: 'Rear axle nut (M16)', val: '100 Nm (73.8 lb-ft)' },
+    { part: 'Front axle bolt (M24)', val: '45 Nm (33.2 lb-ft)' },
     { part: 'Chain tensioner locknuts (M8)', val: '16 Nm (11.8 lb-ft)' },
-    { part: 'Spark plug', val: '12 Nm (8.9 lb-ft)' },
-    { part: 'Front brake caliper bolts (M10)', val: '45 Nm (33.2 lb-ft)' },
+    { part: 'Spark plug (M10x1)', val: '11 Nm (8.1 lb-ft)' },
+    { part: 'Front brake caliper bolts (M8)', val: '29 Nm (21.4 lb-ft)' },
     { part: 'Rear brake caliper bracket bolt (M10)', val: '45 Nm (33.2 lb-ft)' },
     { part: 'Engine oil level sight glass screw', val: '10 Nm (7.4 lb-ft)' }
   ];

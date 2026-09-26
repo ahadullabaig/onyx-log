@@ -371,6 +371,7 @@ app.get('/api/planner', requireAuth, async (req, res) => {
       let dueInDays = null;
       let nextDueOdo = null;
       let nextDueDate = null;
+      let intervalDays = null;
 
       // A km-based task needs an odometer baseline; a time-only task needs only a date.
       const needsOdo = task.interval_km !== null;
@@ -386,6 +387,7 @@ app.get('/api/planner', requireAuth, async (req, res) => {
           const nextDueUTC = addMonthsUTC(lastDoneUTC, task.interval_months);
           nextDueDate = new Date(nextDueUTC).toISOString().split('T')[0];
           dueInDays = Math.round((nextDueUTC - todayUTC) / DAY_MS);
+          intervalDays = Math.round((nextDueUTC - lastDoneUTC) / DAY_MS);
         }
       }
 
@@ -398,11 +400,9 @@ app.get('/api/planner', requireAuth, async (req, res) => {
         }
 
         let pctDays = 0;
-        if (task.interval_months !== null && lastDoneUTC !== null) {
-          const nextDueUTC = addMonthsUTC(lastDoneUTC, task.interval_months);
-          const totalDays = Math.round((nextDueUTC - lastDoneUTC) / DAY_MS);
+        if (intervalDays !== null) {
           const elapsedDays = Math.round((todayUTC - lastDoneUTC) / DAY_MS);
-          pctDays = totalDays > 0 ? Math.max(0, Math.min(100, (elapsedDays / totalDays) * 100)) : 0;
+          pctDays = intervalDays > 0 ? Math.max(0, Math.min(100, (elapsedDays / intervalDays) * 100)) : 0;
         }
 
         consumedPercent = Math.round(Math.max(pctKm, pctDays));
@@ -416,7 +416,9 @@ app.get('/api/planner', requireAuth, async (req, res) => {
         if (!isOverdue) {
           const kmThreshold = task.interval_km && task.interval_km >= 2000 ? 500 : 100;
           const mileageDueSoon = dueInKm !== null && dueInKm <= kmThreshold;
-          const timeDueSoon = dueInDays !== null && dueInDays <= 30;
+          // Warn in the last 20% of a time interval, capped at 30 days, so a
+          // 1-month task isn't "Due Soon" from the day it was completed.
+          const timeDueSoon = dueInDays !== null && dueInDays <= Math.min(30, Math.round(intervalDays * 0.2));
           isDueSoon = mileageDueSoon || timeDueSoon;
         }
 
