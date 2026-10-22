@@ -239,12 +239,12 @@ function App() {
             </div>
           </div>
           <button
-            className="nav-item"
+            className="nav-item logout-btn"
             onClick={handleLogout}
-            style={{ background: 'none', width: '100%', textAlign: 'left', marginTop: '0.75rem', border: '1px solid transparent', color: 'var(--text-secondary)' }}
+            aria-label="Logout"
           >
             <LogOut className="nav-icon" />
-            LOGOUT
+            <span className="logout-label">LOGOUT</span>
           </button>
         </div>
       </aside>

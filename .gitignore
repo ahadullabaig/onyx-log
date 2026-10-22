@@ -4,8 +4,9 @@ node_modules/
 # Build output
 client/dist/
 
-# Database
+# Database and its backups
 server/database.db
+server/backups/
 
 # Uploaded receipts
 server/uploads/

@@ -49,10 +49,14 @@ onyx-log/
 │   ├── server.js            # Express API server, auth, uploads & static routes
 │   ├── db.js                # SQLite connection and migration setup
 │   ├── fuelEconomy.js       # Shared full-to-full fuel-economy calculation
+│   ├── planner.js           # Planner due-date / status engine (pure)
+│   ├── odometer.js          # Odometer validation and derivation
+│   ├── backup.js            # Daily rotating SQLite backups
 │   ├── database.db          # SQLite database storage (generated on start)
+│   ├── backups/             # Daily database snapshots (generated)
 │   ├── uploads/             # Stores physical receipt scans and PDF attachments
 │   ├── package.json         # Backend Node package specifications
-│   └── test_db.js           # Integration database smoke tests
+│   └── test_*.js            # Unit and integration tests (`npm test`)
 └── client/                  # Frontend Single Page App
     ├── vite.config.js       # Vite server configurations with api proxying
     ├── package.json         # React and icon libraries specifications
@@ -130,7 +134,7 @@ set a strong `ACCESS_PASSWORD` for any non-local deployment.**
 | Variable | Default | Purpose |
 |---|---|---|
 | `PORT` | `5000` | Port the Express server listens on. |
-| `DATA_DIR` | `server/` | Directory for `database.db` and `uploads/` (set to `/data` in production). |
+| `DATA_DIR` | `server/` | Directory for `database.db`, `backups/` and `uploads/` (set to `/data` in production). |
 | `ACCESS_PASSWORD` | `onyx250` | Shared access code for the login screen. |
 
 ---
@@ -139,13 +143,22 @@ set a strong `ACCESS_PASSWORD` for any non-local deployment.**
 
 The SQLite database file (`server/database.db`) is automatically initialized and migrates itself when you start the server for the first time.
 
+### Backups
+
+On startup and then hourly, the server checks whether the newest backup is at least a day old. If it is, it writes a consistent snapshot (`VACUUM INTO`) to `DATA_DIR/backups/database-<UTC time>.db` and keeps the newest 7. On Fly.io a stopped machine takes a backup on its first start each day it is used.
+
+These backups live on the same volume as the database, so they protect against bad writes and migrations, not against losing the volume. Fly.io's daily volume snapshots cover that (5-day retention by default; extend it with `fly volumes update <volume id> --snapshot-retention 30`).
+
+To restore: stop the server, copy the chosen backup over `database.db`, and start it again. On Fly.io, download a backup with `fly ssh sftp get /data/backups/<file>`.
+
 ### Tables
 
 #### 1. `bike_status`
 Tracks the current state of the motorcycle. Only contains a single row with `id = 1`.
 - `id` (INTEGER, Primary Key, enforced constant)
-- `current_odometer` (INTEGER, default 0): Current odometer of the bike.
+- `current_odometer` (INTEGER, default 0): Current odometer of the bike. Derived, not edited directly: the highest of `manual_odometer` and every fuel / maintenance log odometer, recomputed whenever any of them changes.
 - `session_secret` (TEXT): Random per-install HMAC key used to sign session tokens.
+- `manual_odometer` (INTEGER, nullable): Last reading entered on the dashboard. Kept separately so deleting a log never discards it.
 
 #### 2. `fuel_logs`
 Stores refueling entries.
@@ -201,22 +214,22 @@ All API requests are sent to the local server at `http://localhost:5000/api/*`.
 
 ### Odometer Status
 *   **`POST /api/odometer`**
-    *   *Body Parameters:* `{ currentOdometer?: number }`
-    *   *Action:* Updates active odometer metrics manually.
+    *   *Body Parameters:* `{ currentOdometer: number }`
+    *   *Action:* Records a manual odometer reading. Every odometer field in the API must be a whole number of km, 0 or more; anything else returns `400`.
 
 ### Fuel Logs
 *   **`GET /api/fuel`**: Returns all fuel logs sorted descending by odometer reading.
 *   **`POST /api/fuel`**
     *   *Body Parameters:* `{ date: string, odometer: number, liters: number, pricePerLiter: number, totalCost: number, fullTank: boolean }`
-    *   *Action:* Saves fuel entry. Automatically increases `current_odometer` in `bike_status` if the log's odometer is greater.
-*   **`DELETE /api/fuel/:id`**: Deletes fuel entry.
+    *   *Action:* Saves fuel entry and recomputes `current_odometer`.
+*   **`DELETE /api/fuel/:id`**: Deletes fuel entry and recomputes `current_odometer`.
 
 ### Maintenance Logs
 *   **`GET /api/maintenance`**: Returns all maintenance logs sorted descending by odometer.
 *   **`POST /api/maintenance`**
     *   *Body Parameters:* `{ date: string, odometer: number, category: string, cost?: number, isDiy?: boolean, description?: string, billPath?: string }`
-    *   *Action:* Saves maintenance log. Synchronizes primary odometer.
-*   **`DELETE /api/maintenance/:id`**: Deletes log entry and deletes the linked uploaded physical receipt file from disk.
+    *   *Action:* Saves maintenance log and recomputes `current_odometer`.
+*   **`DELETE /api/maintenance/:id`**: Deletes log entry, deletes the linked uploaded physical receipt file from disk, and recomputes `current_odometer`.
 
 ### Maintenance Planner
 *   **`GET /api/planner`**

@@ -7,6 +7,9 @@ import { fileURLToPath } from 'url';
 import crypto from 'crypto';
 import { dbRun, dbGet, dbAll, dbReady } from './db.js';
 import { computeFuelEconomy } from './fuelEconomy.js';
+import { computePlannerTasks } from './planner.js';
+import { isValidOdometer, refreshOdometer } from './odometer.js';
+import { scheduleBackups } from './backup.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -157,35 +160,7 @@ app.delete('/api/upload/:filename', requireAuth, (req, res) => {
   res.json({ success: true });
 });
 
-// Sync odometer helper — raises the recorded odometer to match a new log.
-async function syncOdometer(loggedOdo) {
-  const status = await dbGet('SELECT current_odometer FROM bike_status WHERE id = 1');
-  if (status && loggedOdo > status.current_odometer) {
-    await dbRun('UPDATE bike_status SET current_odometer = ? WHERE id = 1', [loggedOdo]);
-  }
-}
-
-// After deleting a log, correct an inflated odometer (e.g. a mistyped entry that
-// had been synced up). Only lowers the odometer when the deleted entry was the
-// one at/above the current reading, so a legitimately higher manual reading is
-// preserved.
-async function recalcOdometerAfterDelete(deletedOdo) {
-  const status = await dbGet('SELECT current_odometer FROM bike_status WHERE id = 1');
-  if (!status || deletedOdo == null || deletedOdo < status.current_odometer) {
-    return;
-  }
-  const row = await dbGet(`
-    SELECT MAX(odo) AS max_odo FROM (
-      SELECT MAX(odometer) AS odo FROM fuel_logs
-      UNION ALL
-      SELECT MAX(odometer) AS odo FROM maintenance_logs
-    )
-  `);
-  const maxOdo = row?.max_odo || 0;
-  if (maxOdo < status.current_odometer) {
-    await dbRun('UPDATE bike_status SET current_odometer = ? WHERE id = 1', [maxOdo]);
-  }
-}
+const INVALID_ODOMETER = 'Odometer must be a whole number of km, 0 or more';
 
 // ---------------- API ENDPOINTS ----------------
 
@@ -218,10 +193,12 @@ app.get('/api/dashboard', requireAuth, async (req, res) => {
 // Update odometer manually
 app.post('/api/odometer', requireAuth, async (req, res) => {
   const { currentOdometer } = req.body;
+  if (!isValidOdometer(currentOdometer)) {
+    return res.status(400).json({ error: INVALID_ODOMETER });
+  }
   try {
-    if (currentOdometer !== undefined) {
-      await dbRun('UPDATE bike_status SET current_odometer = ? WHERE id = 1', [currentOdometer]);
-    }
+    await dbRun('UPDATE bike_status SET manual_odometer = ? WHERE id = 1', [currentOdometer]);
+    await refreshOdometer();
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -256,9 +233,12 @@ app.post('/api/fuel', requireAuth, async (req, res) => {
   if (date == null || odometer == null || liters == null || pricePerLiter == null || totalCost == null) {
     return res.status(400).json({ error: 'All fuel parameters are required' });
   }
-  // Range check: odometer/cost may be 0; liters and price must be positive
-  if (odometer < 0 || totalCost < 0 || liters <= 0 || pricePerLiter <= 0) {
-    return res.status(400).json({ error: 'Liters and price must be greater than 0; odometer and cost cannot be negative' });
+  if (!isValidOdometer(odometer)) {
+    return res.status(400).json({ error: INVALID_ODOMETER });
+  }
+  // Range check: cost may be 0; liters and price must be positive
+  if (totalCost < 0 || liters <= 0 || pricePerLiter <= 0) {
+    return res.status(400).json({ error: 'Liters and price must be greater than 0; cost cannot be negative' });
   }
 
   try {
@@ -266,7 +246,7 @@ app.post('/api/fuel', requireAuth, async (req, res) => {
       'INSERT INTO fuel_logs (date, odometer, liters, price_per_liter, total_cost, full_tank) VALUES (?, ?, ?, ?, ?, ?)',
       [date, odometer, liters, pricePerLiter, totalCost, fullTank ? 1 : 0]
     );
-    await syncOdometer(odometer);
+    await refreshOdometer();
     res.json({ id: result.id, success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -275,9 +255,8 @@ app.post('/api/fuel', requireAuth, async (req, res) => {
 
 app.delete('/api/fuel/:id', requireAuth, async (req, res) => {
   try {
-    const log = await dbGet('SELECT odometer FROM fuel_logs WHERE id = ?', [req.params.id]);
     await dbRun('DELETE FROM fuel_logs WHERE id = ?', [req.params.id]);
-    await recalcOdometerAfterDelete(log?.odometer);
+    await refreshOdometer();
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -297,8 +276,11 @@ app.get('/api/maintenance', requireAuth, async (req, res) => {
 app.post('/api/maintenance', requireAuth, async (req, res) => {
   const { date, odometer, category, cost, isDiy, description, billPath } = req.body;
 
-  if (!date || !odometer || !category) {
+  if (!date || odometer == null || !category) {
     return res.status(400).json({ error: 'Date, odometer, and category are required' });
+  }
+  if (!isValidOdometer(odometer)) {
+    return res.status(400).json({ error: INVALID_ODOMETER });
   }
 
   // Only accept a receipt path that points at a file directly inside /uploads.
@@ -312,8 +294,7 @@ app.post('/api/maintenance', requireAuth, async (req, res) => {
       [date, odometer, category, cost || 0, isDiy ? 1 : 0, description || '', billPath || null]
     );
 
-    // Sync primary odometer
-    await syncOdometer(odometer);
+    await refreshOdometer();
 
     res.json({ id: result.id, success: true });
   } catch (error) {
@@ -326,7 +307,7 @@ app.delete('/api/maintenance/:id', requireAuth, async (req, res) => {
     // Delete linked receipt if present. Resolve strictly inside UPLOADS_DIR via
     // basename() so a crafted bill_path (e.g. "/uploads/../../etc/x") can never
     // point fs.unlinkSync outside the uploads folder.
-    const log = await dbGet('SELECT bill_path, odometer FROM maintenance_logs WHERE id = ?', [req.params.id]);
+    const log = await dbGet('SELECT bill_path FROM maintenance_logs WHERE id = ?', [req.params.id]);
     if (log && log.bill_path) {
       const fullPath = path.join(UPLOADS_DIR, path.basename(log.bill_path));
       if (fullPath.startsWith(UPLOADS_DIR) && fs.existsSync(fullPath)) {
@@ -335,7 +316,7 @@ app.delete('/api/maintenance/:id', requireAuth, async (req, res) => {
     }
 
     await dbRun('DELETE FROM maintenance_logs WHERE id = ?', [req.params.id]);
-    await recalcOdometerAfterDelete(log?.odometer);
+    await refreshOdometer();
     res.json({ success: true });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -349,110 +330,11 @@ app.get('/api/planner', requireAuth, async (req, res) => {
     const status = await dbGet('SELECT current_odometer FROM bike_status WHERE id = 1');
     const currentOdo = status?.current_odometer || 0;
     const tasks = await dbAll('SELECT * FROM maintenance_planner');
-    
-    // Work in whole calendar days in UTC to avoid timezone off-by-one errors:
-    // stored dates are plain YYYY-MM-DD, so treat them (and "today") as UTC midnights.
-    const DAY_MS = 1000 * 60 * 60 * 24;
-    const now = new Date();
-    const todayUTC = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
 
-    const parseDateUTC = (str) => {
-      const [y, m, d] = str.split('-').map(Number);
-      return Date.UTC(y, m - 1, d);
-    };
-    const addMonthsUTC = (utcMs, months) => {
-      const d = new Date(utcMs);
-      d.setUTCMonth(d.getUTCMonth() + months);
-      return d.getTime();
-    };
-
-    const calculatedTasks = tasks.map(task => {
-      let dueInKm = null;
-      let dueInDays = null;
-      let nextDueOdo = null;
-      let nextDueDate = null;
-      let intervalDays = null;
-
-      // A km-based task needs an odometer baseline; a time-only task needs only a date.
-      const needsOdo = task.interval_km !== null;
-      const isConfigured = task.last_done_date != null && (!needsOdo || task.last_done_odometer != null);
-      const lastDoneUTC = task.last_done_date != null ? parseDateUTC(task.last_done_date) : null;
-
-      if (isConfigured) {
-        if (task.interval_km !== null) {
-          nextDueOdo = task.last_done_odometer + task.interval_km;
-          dueInKm = nextDueOdo - currentOdo;
-        }
-        if (task.interval_months !== null) {
-          const nextDueUTC = addMonthsUTC(lastDoneUTC, task.interval_months);
-          nextDueDate = new Date(nextDueUTC).toISOString().split('T')[0];
-          dueInDays = Math.round((nextDueUTC - todayUTC) / DAY_MS);
-          intervalDays = Math.round((nextDueUTC - lastDoneUTC) / DAY_MS);
-        }
-      }
-
-      let consumedPercent = 0;
-      if (isConfigured) {
-        let pctKm = 0;
-        if (task.interval_km !== null) {
-          const runDistance = currentOdo - task.last_done_odometer;
-          pctKm = Math.max(0, Math.min(100, (runDistance / task.interval_km) * 100));
-        }
-
-        let pctDays = 0;
-        if (intervalDays !== null) {
-          const elapsedDays = Math.round((todayUTC - lastDoneUTC) / DAY_MS);
-          pctDays = intervalDays > 0 ? Math.max(0, Math.min(100, (elapsedDays / intervalDays) * 100)) : 0;
-        }
-
-        consumedPercent = Math.round(Math.max(pctKm, pctDays));
-      }
-
-      let taskStatus = 'Unconfigured';
-      if (isConfigured) {
-        const isOverdue = (dueInKm !== null && dueInKm <= 0) || (dueInDays !== null && dueInDays <= 0);
-        
-        let isDueSoon = false;
-        if (!isOverdue) {
-          const kmThreshold = task.interval_km && task.interval_km >= 2000 ? 500 : 100;
-          const mileageDueSoon = dueInKm !== null && dueInKm <= kmThreshold;
-          // Warn in the last 20% of a time interval, capped at 30 days, so a
-          // 1-month task isn't "Due Soon" from the day it was completed.
-          const timeDueSoon = dueInDays !== null && dueInDays <= Math.min(30, Math.round(intervalDays * 0.2));
-          isDueSoon = mileageDueSoon || timeDueSoon;
-        }
-
-        if (isOverdue) {
-          taskStatus = 'Overdue';
-        } else if (isDueSoon) {
-          taskStatus = 'Due Soon';
-        } else {
-          taskStatus = 'Upcoming';
-        }
-      }
-
-      return {
-        ...task,
-        dueInKm,
-        dueInDays,
-        nextDueOdo,
-        nextDueDate,
-        status: taskStatus,
-        consumedPercent
-      };
-    });
-
-    const statusOrder = { 'Overdue': 0, 'Due Soon': 1, 'Unconfigured': 2, 'Upcoming': 3 };
-    calculatedTasks.sort((a, b) => {
-      if (statusOrder[a.status] !== statusOrder[b.status]) {
-        return statusOrder[a.status] - statusOrder[b.status];
-      }
-      return a.task_name.localeCompare(b.task_name);
-    });
-
+    // Due dates, statuses and consumed-life percentages (single source of truth)
     res.json({
       currentOdometer: currentOdo,
-      tasks: calculatedTasks
+      tasks: computePlannerTasks(tasks, currentOdo)
     });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -467,6 +349,9 @@ app.post('/api/planner', requireAuth, async (req, res) => {
   if (intervalKm == null && intervalMonths == null) {
     return res.status(400).json({ error: 'At least one interval (km or months) must be specified' });
   }
+  if (lastDoneOdometer != null && !isValidOdometer(lastDoneOdometer)) {
+    return res.status(400).json({ error: INVALID_ODOMETER });
+  }
   try {
     const result = await dbRun(
       'INSERT INTO maintenance_planner (task_name, interval_km, interval_months, last_done_date, last_done_odometer, is_custom) VALUES (?, ?, ?, ?, ?, 1)',
@@ -475,7 +360,7 @@ app.post('/api/planner', requireAuth, async (req, res) => {
         intervalKm ? parseInt(intervalKm, 10) : null,
         intervalMonths ? parseInt(intervalMonths, 10) : null,
         lastDoneDate || null,
-        lastDoneOdometer != null ? parseInt(lastDoneOdometer, 10) : null
+        lastDoneOdometer ?? null
       ]
     );
     res.json({ id: result.id, success: true });
@@ -489,6 +374,9 @@ app.put('/api/planner/:id', requireAuth, async (req, res) => {
   if (!taskName) {
     return res.status(400).json({ error: 'Task name is required' });
   }
+  if (lastDoneOdometer != null && !isValidOdometer(lastDoneOdometer)) {
+    return res.status(400).json({ error: INVALID_ODOMETER });
+  }
   try {
     await dbRun(
       'UPDATE maintenance_planner SET task_name = ?, interval_km = ?, interval_months = ?, last_done_date = ?, last_done_odometer = ? WHERE id = ?',
@@ -497,7 +385,7 @@ app.put('/api/planner/:id', requireAuth, async (req, res) => {
         intervalKm ? parseInt(intervalKm, 10) : null,
         intervalMonths ? parseInt(intervalMonths, 10) : null,
         lastDoneDate || null,
-        lastDoneOdometer != null ? parseInt(lastDoneOdometer, 10) : null,
+        lastDoneOdometer ?? null,
         req.params.id
       ]
     );
@@ -512,10 +400,13 @@ app.post('/api/planner/:id/complete', requireAuth, async (req, res) => {
   if (!completionDate || completionOdometer == null) {
     return res.status(400).json({ error: 'Completion date and odometer are required' });
   }
+  if (!isValidOdometer(completionOdometer)) {
+    return res.status(400).json({ error: INVALID_ODOMETER });
+  }
   try {
     await dbRun(
       'UPDATE maintenance_planner SET last_done_date = ?, last_done_odometer = ? WHERE id = ?',
-      [completionDate, parseInt(completionOdometer, 10), req.params.id]
+      [completionDate, completionOdometer, req.params.id]
     );
     res.json({ success: true });
   } catch (error) {
@@ -573,6 +464,8 @@ dbReady.then(async () => {
   } catch (err) {
     console.error('Failed to load session secret from database:', err);
   }
+
+  scheduleBackups();
 
   app.listen(PORT, () => {
     console.log(`Server is running at http://localhost:${PORT}`);

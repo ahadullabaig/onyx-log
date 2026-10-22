@@ -7,7 +7,7 @@ import crypto from 'crypto';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DATA_DIR = process.env.DATA_DIR || __dirname;
+export const DATA_DIR = process.env.DATA_DIR || __dirname;
 const DB_PATH = path.join(DATA_DIR, 'database.db');
 
 // Ensure database file directory exists
@@ -113,7 +113,8 @@ async function initializeDatabase() {
       CREATE TABLE IF NOT EXISTS bike_status (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         current_odometer INTEGER DEFAULT 0,
-        session_secret TEXT
+        session_secret TEXT,
+        manual_odometer INTEGER
       )
     `);
 
@@ -161,6 +162,24 @@ async function initializeDatabase() {
         is_custom INTEGER DEFAULT 0
       )
     `);
+
+    // Schema migration: manual_odometer holds the last hand-entered reading so the
+    // derived odometer (odometer.js) can't drop below it when logs are deleted.
+    // An existing reading is kept as manual only when no log accounts for it.
+    if (!columns.some(col => col.name === 'manual_odometer')) {
+      await dbRun('ALTER TABLE bike_status ADD COLUMN manual_odometer INTEGER');
+      await dbRun(`
+        UPDATE bike_status SET manual_odometer = current_odometer
+        WHERE id = 1 AND current_odometer > (
+          SELECT COALESCE(MAX(odo), 0) FROM (
+            SELECT MAX(odometer) AS odo FROM fuel_logs
+            UNION ALL
+            SELECT MAX(odometer) AS odo FROM maintenance_logs
+          )
+        )
+      `);
+      console.log('Added manual_odometer column to bike_status.');
+    }
 
     // Pre-populate factory default tasks if table is empty
     const plannerCount = await dbGet('SELECT COUNT(*) as count FROM maintenance_planner');

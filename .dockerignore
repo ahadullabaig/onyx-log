@@ -3,6 +3,7 @@ client/node_modules/
 server/node_modules/
 client/dist/
 server/database.db
+server/backups/
 server/uploads/
 .git/
 .claude/
