@@ -246,6 +246,14 @@ body {
   border-top: 1px solid var(--border-metal);
 }
 
+.logout-btn {
+  width: 100%;
+  margin-top: 0.75rem;
+  background: none;
+  color: var(--text-secondary);
+  text-align: left;
+}
+
 /* bike status pod — like a gauge readout */
 .bike-card-mini {
   position: relative;
@@ -957,7 +965,7 @@ tr:hover td:first-child { box-shadow: inset 3px 0 0 var(--ktm-orange); }
   .sidebar {
     width: 100%;
     height: auto;
-    position: static;
+    position: relative;
     padding: 1.25rem 1rem;
     border-right: none;
     border-bottom: 1px solid var(--border-metal);
@@ -967,13 +975,27 @@ tr:hover td:first-child { box-shadow: inset 3px 0 0 var(--ktm-orange); }
   .nav-menu { flex-direction: row; overflow-x: auto; gap: 0.25rem; padding-bottom: 0.5rem; }
   .nav-item { padding: 0.55rem 0.8rem; font-size: 0.8rem; white-space: nowrap; }
   .nav-item::before { display: none; }
-  .sidebar-footer { display: none; }
+  /* Footer collapses to just the logout button, pinned beside the brand */
+  .sidebar-footer {
+    position: absolute;
+    top: 1.25rem;
+    right: 1rem;
+    padding-top: 0;
+    border-top: none;
+  }
+  .bike-card-mini { display: none; }
+  .logout-btn { width: auto; margin-top: 0; }
   .main-content { padding: 1.25rem; width: 100%; }
   .dashboard-grid { gap: 1rem; }
   .dashboard-header { flex-direction: column; align-items: flex-start; gap: 1rem; }
   .col-8, .col-4, .col-6, .col-3 { grid-column: span 12; }
   .stat-value { font-size: 1.9rem; }
   .form-row { grid-template-columns: 1fr; gap: 0; }
+}
+
+/* Narrowest phones: icon-only logout so it clears the brand title */
+@media (max-width: 360px) {
+  .logout-label { display: none; }
 }
 
 /* ============================================================================
